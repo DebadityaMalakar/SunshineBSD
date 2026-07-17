@@ -124,6 +124,23 @@ release_line=$(cat "$root_dir/branding/version")
     echo "Remastered from FreeBSD-$VERSION-$ARCH-$FLAVOR (Stage 0 test image)"
 } > "$tree/etc/sunshine-release"
 
+# uname branding: from-source builds get TYPE="SunshineBSD" compiled in
+# via brand-freebsd.sh, but this remastered ISO boots the upstream
+# binary kernel. FreeBSD uname(1) honors UNAME_* environment overrides
+# (see uname(1) ENVIRONMENT), so set them for every login shell.
+cat >> "$tree/etc/profile" <<'EOF'
+
+# SunshineBSD identity (added by tools/make-iso.sh)
+UNAME_s="SunshineBSD"; export UNAME_s
+UNAME_v="SunshineBSD 0.1-CURRENT (remastered FreeBSD kernel)"; export UNAME_v
+EOF
+cat >> "$tree/etc/csh.cshrc" <<'EOF'
+
+# SunshineBSD identity (added by tools/make-iso.sh)
+setenv UNAME_s SunshineBSD
+setenv UNAME_v "SunshineBSD 0.1-CURRENT (remastered FreeBSD kernel)"
+EOF
+
 cat >> "$tree/boot/loader.conf" <<'EOF'
 
 # --- SunshineBSD branding (added by tools/make-iso.sh) ---
@@ -151,6 +168,12 @@ chmod 0755 "$sbin/sunconfig"
 
 cp "$root_dir/src/rc-compat/rc2runit" "$sbin/rc2runit"
 chmod 0755 "$sbin/rc2runit"
+
+cp "$root_dir/src/sunsnap/sunsnap" "$sbin/sunsnap"
+chmod 0755 "$sbin/sunsnap"
+
+mkdir -p "$tree/etc/sunshine/zsh"
+cp "$root_dir/branding/zshrc" "$tree/etc/sunshine/zsh/zshrc"
 
 cp "$root_dir/examples/etc-sunshine/"*.lua "$tree/etc/sunshine/"
 cp "$root_dir/PLAN.md" "$root_dir/DOCS/"*.MD \

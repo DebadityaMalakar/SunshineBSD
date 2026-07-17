@@ -6,7 +6,8 @@
 # Usage:
 #   make test              run all Lua test suites
 #   make test-schema       run one suite
-#   make test-rc2runit     run the sh-based rc2runit suite (needs sh)
+#   make test-rc2runit     run one sh-based suite (also: test-sunsnap,
+#                          test-zshrc)
 #   make check             everything
 #   make example           compile the example config into ./sunconfig-out
 #
@@ -41,7 +42,9 @@ LUA_SUITES = \
 	test-build \
 	test-cli
 
-.PHONY: all test check example clean $(LUA_SUITES) test-rc2runit \
+SH_SUITES = test-rc2runit test-sunsnap test-zshrc
+
+.PHONY: all test check example clean $(LUA_SUITES) $(SH_SUITES) \
 	fetch brand world kernel image iso qemu qemu-iso \
 	wsl-check wsl-world wsl-kernel wsl-iso
 
@@ -53,10 +56,10 @@ test: $(LUA_SUITES)
 $(LUA_SUITES):
 	$(LUA) tests/$(subst test-,test_,$@).lua
 
-test-rc2runit:
-	$(SH) tests/test_rc2runit.sh
+$(SH_SUITES):
+	$(SH) tests/$(subst test-,test_,$@).sh
 
-check: test test-rc2runit
+check: test $(SH_SUITES)
 	@echo "== full check passed =="
 
 example:

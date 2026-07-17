@@ -1,0 +1,290 @@
+#!/bin/sh
+# sunsnap — SunshineBSD snapshot and boot-environment lifecycle tool.
+#
+# One job: create a safety point before a system-changing operation, and
+# get back to it. Wraps zfs(8) and bectl(8); see DOCS/ZFS.MD for the
+# design and DOCS/ENGINEERING.MD for the rules this code follows.
+#
+# usage: sunsnap pre <label>
+#        sunsnap list
+#        sunsnap rollback <boot-environment>
+#        sunsnap prune <keep>
+#        sunsnap version | help
+#
+# Environment (injectable so the test suite can substitute stubs):
+#   SUNSNAP_ZFS      zfs binary        (default: zfs)
+#   SUNSNAP_BECTL    bectl binary      (default: bectl)
+#   SUNSNAP_DATASET  root dataset      (default: detected from mounted /)
+#   SUNSNAP_NOW      timestamp YYYYMMDDHHMMSS (default: current time)
+#
+# This is deliberately #!/bin/sh, not zsh: it must run in single-user
+# and recovery contexts where /usr/local is not mounted (DOCS/ZSH.MD,
+# "POSIX sh Compatibility").
+
+set -u
+
+VERSION="0.1"
+PREFIX="sunshine-"
+MAX_LABEL_LEN=32
+MAX_PRUNE=1000
+
+ZFS="${SUNSNAP_ZFS:-zfs}"
+BECTL="${SUNSNAP_BECTL:-bectl}"
+
+err() {
+    echo "sunsnap: $*" >&2
+}
+
+usage() {
+    cat <<'EOF'
+usage: sunsnap pre <label>       create safety point (snapshot + boot env)
+       sunsnap list              list SunshineBSD snapshots and boot envs
+       sunsnap rollback <name>   activate boot environment (needs reboot)
+       sunsnap prune <keep>      destroy oldest sunshine- snapshots,
+                                 keeping the newest <keep>
+       sunsnap version           print version
+       sunsnap help              this text
+EOF
+}
+
+# valid_label <label>: lowercase letters, digits, '-'; must start with a
+# letter; bounded length. Same negated-class technique as rc2runit —
+# a plain [a-z0-9-]* case pattern would accept trailing garbage.
+valid_label() {
+    case $1 in
+        *[!a-z0-9-]*|"") return 1 ;;
+    esac
+    case $1 in
+        [!a-z]*) return 1 ;;
+    esac
+    [ ${#1} -le $MAX_LABEL_LEN ]
+}
+
+# valid_stamp <stamp>: exactly 14 digits (YYYYMMDDHHMMSS).
+valid_stamp() {
+    case $1 in
+        *[!0-9]*|"") return 1 ;;
+    esac
+    [ ${#1} -eq 14 ]
+}
+
+# timestamp: SUNSNAP_NOW if set (validated), else date(1).
+timestamp() {
+    if [ -n "${SUNSNAP_NOW:-}" ]; then
+        if ! valid_stamp "$SUNSNAP_NOW"; then
+            err "SUNSNAP_NOW must be 14 digits (YYYYMMDDHHMMSS), got: $SUNSNAP_NOW"
+            return 1
+        fi
+        echo "$SUNSNAP_NOW"
+        return 0
+    fi
+    now=$(date +%Y%m%d%H%M%S) || {
+        err "date(1) failed"
+        return 1
+    }
+    if ! valid_stamp "$now"; then
+        err "date(1) produced a malformed timestamp: $now"
+        return 1
+    fi
+    echo "$now"
+}
+
+# root_dataset: SUNSNAP_DATASET if set, else the dataset mounted at /.
+root_dataset() {
+    if [ -n "${SUNSNAP_DATASET:-}" ]; then
+        echo "$SUNSNAP_DATASET"
+        return 0
+    fi
+    ds=$("$ZFS" list -H -o name /) || {
+        err "cannot detect root dataset: '$ZFS list -H -o name /' failed"
+        return 1
+    }
+    # Keep only the first line; refuse anything that does not look like
+    # a dataset name we would ever generate paths from.
+    ds=$(echo "$ds" | head -n 1)
+    case $ds in
+        ""|*[!a-zA-Z0-9/_.-]*)
+            err "detected root dataset looks invalid: '$ds'"
+            return 1
+            ;;
+    esac
+    echo "$ds"
+}
+
+cmd_pre() {
+    if [ $# -ne 1 ]; then
+        err "pre needs exactly one label"
+        usage >&2
+        return 2
+    fi
+    label=$1
+    if ! valid_label "$label"; then
+        err "invalid label '$label' (want: [a-z][a-z0-9-]*, max $MAX_LABEL_LEN chars)"
+        return 2
+    fi
+
+    stamp=$(timestamp) || return 2
+    dataset=$(root_dataset) || return 1
+    name="$PREFIX$label-$stamp"
+
+    if ! "$ZFS" snapshot -r "$dataset@$name"; then
+        err "zfs snapshot -r $dataset@$name failed"
+        return 1
+    fi
+    echo "sunsnap: snapshot $dataset@$name"
+
+    if command -v "$BECTL" >/dev/null 2>&1; then
+        if ! "$BECTL" create "$name"; then
+            err "bectl create $name failed"
+            return 1
+        fi
+        echo "sunsnap: boot environment $name"
+    else
+        err "warning: $BECTL not found; snapshot created but no boot environment"
+    fi
+    return 0
+}
+
+cmd_list() {
+    if [ $# -ne 0 ]; then
+        err "list takes no arguments"
+        return 2
+    fi
+    snaps=$("$ZFS" list -H -t snapshot -o name -s creation) || {
+        err "zfs list failed"
+        return 1
+    }
+    echo "sunsnap: snapshots:"
+    found=0
+    for s in $snaps; do
+        case $s in
+            *@$PREFIX*)
+                echo "  $s"
+                found=$((found + 1))
+                ;;
+        esac
+    done
+    [ $found -eq 0 ] && echo "  (none)"
+
+    if command -v "$BECTL" >/dev/null 2>&1; then
+        echo "sunsnap: boot environments:"
+        "$BECTL" list || {
+            err "bectl list failed"
+            return 1
+        }
+    fi
+    return 0
+}
+
+cmd_rollback() {
+    if [ $# -ne 1 ]; then
+        err "rollback needs exactly one boot environment name"
+        usage >&2
+        return 2
+    fi
+    name=$1
+    case $name in
+        "$PREFIX"*) : ;;
+        *)
+            err "refusing to activate '$name': not a $PREFIX* boot environment"
+            return 2
+            ;;
+    esac
+    case $name in
+        *[!a-z0-9-]*)
+            err "invalid boot environment name '$name'"
+            return 2
+            ;;
+    esac
+
+    if ! "$BECTL" activate "$name"; then
+        err "bectl activate $name failed"
+        return 1
+    fi
+    echo "sunsnap: $name activated; reboot to complete the rollback"
+    return 0
+}
+
+cmd_prune() {
+    if [ $# -ne 1 ]; then
+        err "prune needs exactly one argument: how many snapshots to keep"
+        usage >&2
+        return 2
+    fi
+    keep=$1
+    case $keep in
+        *[!0-9]*|"")
+            err "keep must be a positive integer, got: '$keep'"
+            return 2
+            ;;
+    esac
+    if [ "$keep" -lt 1 ]; then
+        err "keep must be at least 1"
+        return 2
+    fi
+
+    snaps=$("$ZFS" list -H -t snapshot -o name -s creation) || {
+        err "zfs list failed"
+        return 1
+    }
+
+    count=0
+    for s in $snaps; do
+        case $s in
+            *@$PREFIX*) count=$((count + 1)) ;;
+        esac
+    done
+
+    excess=$((count - keep))
+    if [ $excess -le 0 ]; then
+        echo "sunsnap: $count $PREFIX* snapshot(s), keeping $keep: nothing to prune"
+        return 0
+    fi
+    if [ $excess -gt $MAX_PRUNE ]; then
+        err "refusing to destroy $excess snapshots in one run (max $MAX_PRUNE)"
+        return 1
+    fi
+
+    destroyed=0
+    for s in $snaps; do
+        [ $destroyed -ge $excess ] && break
+        # Double guard: destroy only names carrying the sunshine- prefix.
+        case $s in
+            *@$PREFIX*) : ;;
+            *) continue ;;
+        esac
+        if ! "$ZFS" destroy "$s"; then
+            err "zfs destroy $s failed"
+            return 1
+        fi
+        echo "sunsnap: destroyed $s"
+        destroyed=$((destroyed + 1))
+    done
+    echo "sunsnap: pruned $destroyed snapshot(s), kept $keep newest"
+    return 0
+}
+
+main() {
+    if [ $# -lt 1 ]; then
+        usage >&2
+        return 2
+    fi
+    cmd=$1
+    shift
+    case $cmd in
+        pre)      cmd_pre "$@" ;;
+        list)     cmd_list "$@" ;;
+        rollback) cmd_rollback "$@" ;;
+        prune)    cmd_prune "$@" ;;
+        version)  echo "sunsnap $VERSION" ;;
+        help|-h|--help) usage ;;
+        *)
+            err "unknown command: $cmd"
+            usage >&2
+            return 2
+            ;;
+    esac
+}
+
+main "$@"
+exit $?

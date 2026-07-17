@@ -1,0 +1,51 @@
+# SunshineBSD system-wide zsh defaults.
+#
+# Installed as /etc/sunshine/zsh/zshrc and sourced before the user's
+# ~/.zshrc, which always wins. Design: DOCS/ZSH.MD.
+
+# --- history (persistent, deduplicated, timestamped) -------------------
+
+HISTFILE="${XDG_DATA_HOME:-$HOME/.local/share}/zsh/history"
+HISTSIZE=10000
+SAVEHIST=10000
+
+# Create the history directory; fall back to a plain dotfile on failure
+# rather than silently losing history.
+if [[ ! -d "${HISTFILE:h}" ]]; then
+    mkdir -p -- "${HISTFILE:h}" 2>/dev/null || HISTFILE="$HOME/.zsh_history"
+fi
+
+setopt EXTENDED_HISTORY          # timestamp tracking
+setopt HIST_IGNORE_ALL_DUPS      # duplicate removal
+setopt HIST_REDUCE_BLANKS
+setopt INC_APPEND_HISTORY        # persist as you go, not only on exit
+
+# --- interaction -------------------------------------------------------
+
+setopt AUTO_CD
+setopt EXTENDED_GLOB
+setopt NO_BEEP
+setopt INTERACTIVE_COMMENTS
+
+# --- completion --------------------------------------------------------
+
+autoload -Uz compinit
+compinit
+zstyle ':completion:*' menu select
+zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
+
+# --- prompt: user@host directory (git-branch) % ------------------------
+
+autoload -Uz vcs_info
+zstyle ':vcs_info:*' enable git
+zstyle ':vcs_info:git:*' formats ' (%b)'
+precmd() { vcs_info }
+setopt PROMPT_SUBST
+PROMPT='%n@%m %~${vcs_info_msg_0_} %# '
+
+# --- environment -------------------------------------------------------
+
+: "${EDITOR:=vi}"
+export EDITOR
+
+alias ll="ls -lah"
