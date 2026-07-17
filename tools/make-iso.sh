@@ -178,15 +178,20 @@ case "$bios_img" in
         ;;
 esac
 
+# -uid 0 -gid 0: the tree was extracted as an unprivileged user, but the
+# live system's init checks that files like /etc/login.conf are owned by
+# root; record root ownership in the RockRidge metadata.
 if [ -n "$uefi_img" ]; then
     cp "$uefi_img" "$tree/boot/efiboot.img"
     xorriso -as mkisofs -o "$out" -V "$label" -rock -joliet-long \
+        -uid 0 -gid 0 \
         -b "$bios_arg" -no-emul-boot \
         -eltorito-alt-boot -e boot/efiboot.img -no-emul-boot \
         "$tree"
 else
     echo "make-iso: warning: no UEFI boot image found; BIOS boot only"
     xorriso -as mkisofs -o "$out" -V "$label" -rock -joliet-long \
+        -uid 0 -gid 0 \
         -b "$bios_arg" -no-emul-boot \
         "$tree"
 fi
