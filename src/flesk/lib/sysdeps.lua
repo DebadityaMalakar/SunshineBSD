@@ -12,6 +12,22 @@ local function fail(fn, msg)
     error("flesk.sysdeps." .. fn .. ": " .. msg, 3)
 end
 
+local IS_WINDOWS = package.config:sub(1, 1) == "\\"
+
+-- On a bare FreeBSD medium, `pkg` bootstraps itself on first use and
+-- asks an interactive "install pkg now? [y/N]" prompt. Any probe whose
+-- stderr we discard (as the pkg one does) swallows that prompt
+-- invisibly while the child blocks forever waiting for input the user
+-- never knew to give, hanging f:read() below. Wrapping in a subshell
+-- with stdin from /dev/null makes such a prompt hit EOF immediately
+-- instead. io.popen shells via cmd.exe on Windows, where this POSIX
+-- syntax is meaningless, so it's skipped there — that's a dev/test
+-- convenience only, never the deployment target.
+local function wrap(cmd)
+    if IS_WINDOWS then return cmd end
+    return "(" .. cmd .. ") </dev/null"
+end
+
 -- run(cmd): stdout of `cmd`, or nil if the command failed or produced
 -- nothing readable. Output is bounded at MAX_READ bytes.
 local function run(cmd)
@@ -19,7 +35,7 @@ local function run(cmd)
         fail("run", "cmd must be a non-empty string (max " .. M.MAX_CMD .. " chars)")
     end
     if type(io.popen) ~= "function" then return nil end
-    local ok_open, f = pcall(io.popen, cmd, "r")
+    local ok_open, f = pcall(io.popen, wrap(cmd), "r")
     if not ok_open or not f then return nil end
     local out = f:read(M.MAX_READ)
     local ok = f:close()

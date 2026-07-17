@@ -26,6 +26,20 @@ t.case("run returns nil for a failing command", function()
     t.eq(deps.run("exit 1"), nil, "nonzero exit")
 end)
 
+t.case("run redirects the child's stdin so it can never block on input", function()
+    if package.config:sub(1, 1) == "\\" then
+        -- POSIX-only protection; io.popen shells via cmd.exe on Windows,
+        -- a dev/test convenience that was never the deployment target.
+        t.ok(true, "not applicable on Windows")
+        return
+    end
+    -- `cat` with no args echoes stdin; without the redirect it would
+    -- block forever waiting on a terminal that will never provide
+    -- input, exactly like an unbootstrapped `pkg` hanging on a hidden
+    -- y/N prompt.
+    t.eq(deps.run("cat"), nil, "immediate EOF, no output")
+end)
+
 t.case("run validates its argument", function()
     t.not_ok(pcall(deps.run, ""), "empty")
     t.not_ok(pcall(deps.run, nil), "nil")
