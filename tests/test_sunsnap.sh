@@ -104,7 +104,7 @@ reset_log
 
 check    "help exits 0"            sh "$SUNSNAP" help
 check    "help prints usage"       sh -c "sh $SUNSNAP help | grep -q 'usage:'"
-check    "version prints version"  sh -c "sh $SUNSNAP version | grep -q 'sunsnap 0.2.0'"
+check    "version prints version"  sh -c "sh $SUNSNAP version | grep -q 'sunsnap 0.3.0'"
 check_exit "no arguments is a usage error"   2 sh "$SUNSNAP"
 check_exit "unknown command is a usage error" 2 sh "$SUNSNAP" frobnicate
 

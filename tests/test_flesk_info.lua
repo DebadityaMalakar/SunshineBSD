@@ -19,7 +19,7 @@ local function stub_deps(over)
         ["sysctl -n hw.physmem 2>/dev/null"] = "17179869184\n",
     }
     local files = {
-        ["/etc/sunshine-release"] = "SunshineBSD 0.2.0\nRemastered from FreeBSD\n",
+        ["/etc/sunshine-release"] = "SunshineBSD 0.3.0\nRemastered from FreeBSD\n",
     }
     local env = { USER = "auriel", SHELL = "/usr/local/bin/zsh" }
     return {
@@ -108,7 +108,7 @@ end)
 
 t.case("gather produces every row in order on a full system", function()
     t.deep(info.gather(stub_deps()), {
-        { label = "OS", value = "SunshineBSD 0.2.0" },
+        { label = "OS", value = "SunshineBSD 0.3.0" },
         { label = "Host", value = "sunshine" },
         { label = "Kernel", value = "14.3-RELEASE" },
         { label = "Uptime", value = "1 day, 1 hour" },

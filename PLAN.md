@@ -158,3 +158,13 @@ between applications and the kernel.
 
 The BSD-like evolution rule: **replace one component, stabilize, replace
 the next.**
+
+## Related Plans
+
+- [PLAN-LUA.MD](PLAN-LUA.MD) — a cross-cutting initiative, not a
+  numbered stage above: replacing ports-provided Python utilities
+  (fail2ban, certbot, glances, ...) with CLI-compatible Lua
+  equivalents, so a default SunshineBSD install never needs Python.
+- [PLAN-03.MD](PLAN-03.MD) — where Stage 1 (XFCE) and Stage 4 (runit)
+  meet: installing XFCE and SDDM as natively runit-supervised services,
+  with rc(8) fully retired rather than kept as a parallel system.

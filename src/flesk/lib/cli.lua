@@ -7,7 +7,7 @@ local render = require("render")
 
 local M = {}
 
-M.VERSION = "0.2.0"
+M.VERSION = "0.3.0"
 M.MAX_ARGS = 8
 
 local USAGE = [[

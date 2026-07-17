@@ -21,6 +21,12 @@ T.case("the core services from the plan are present", function()
     T.ok(registry.get("bluetooth"), "bluetooth")
 end)
 
+T.case("the PLAN-03.MD desktop-session services are present", function()
+    T.ok(registry.get("dbus"), "dbus")
+    T.ok(registry.get("polkit"), "polkit")
+    T.ok(registry.get("consolekit2"), "consolekit2")
+end)
+
 T.case("every entry has a valid absolute foreground command", function()
     for _, name in ipairs(registry.names()) do
         local entry = registry.get(name)

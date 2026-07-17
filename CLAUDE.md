@@ -65,6 +65,8 @@ rule is BSD-like — replace one component, stabilize, replace the next.
 ## Required Reading
 
 - [PLAN.md](PLAN.md)
+- [PLAN-LUA.MD](PLAN-LUA.MD)
+- [PLAN-03.MD](PLAN-03.MD)
 - [DOCS/ENGINEERING.MD](DOCS/ENGINEERING.MD)
 - [DOCS/LUA.MD](DOCS/LUA.MD)
 - [DOCS/RUNIT.MD](DOCS/RUNIT.MD)

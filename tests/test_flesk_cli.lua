@@ -65,7 +65,7 @@ end)
 t.case("--version prints the version and exits 0", function()
     local code, out = run({ "--version" })
     t.eq(code, 0, "exit code")
-    t.eq(out, "flesk 0.2.0\n", "version line")
+    t.eq(out, "flesk 0.3.0\n", "version line")
 end)
 
 t.case("unknown arguments are a usage error", function()

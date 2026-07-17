@@ -8,4 +8,6 @@ services = {
     sshd = false,
     bluetooth = { enabled = false },
     dbus = { enabled = true, restart = true },
+    polkit = { enabled = true, restart = true },
+    consolekit2 = { enabled = true, restart = true },
 }

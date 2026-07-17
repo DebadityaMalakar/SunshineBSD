@@ -17,6 +17,10 @@ configuration).
 
 ```
 PLAN.md                 Staged development plan
+PLAN-LUA.MD             Cross-cutting plan: replace ports Python utilities
+                        with CLI-compatible Lua equivalents
+PLAN-03.MD              Stage 1 + 4 plan: XFCE + SDDM as native runit
+                        services, rc(8) fully retired
 CLAUDE.md               Project instructions and required reading
 DOCS/
     ENGINEERING.MD      Code and testing rules for this repository
@@ -35,6 +39,12 @@ src/
     flesk/
         flesk           System-info banner (SunshineBSD's neofetch)
         lib/            One module per responsibility
+    pkgfetch/
+        pkgfetch        Resolve a FreeBSD pkg dependency closure (`resolve` subcommand)
+        lib/            One module per responsibility
+    flash/
+        flash           Lists SunshineBSD's own tooling + fetch-pkg.sh's installed packages
+        lib/            One module per responsibility
 branding/               SunshineBSD identity (motd, version, icon, zshrc)
     loader/             Boot-loader Lua brand (wordmark + mascot ASCII art)
 examples/
@@ -44,7 +54,10 @@ tools/
     brand-freebsd.sh    Mark the vendored tree as a SunshineBSD fork
     build-os.sh         buildworld / buildkernel wrapper (FreeBSD or WSL)
     make-image.sh       VM image build (FreeBSD host, needs root)
-    make-iso.sh         Stage 0 bootable ISO remaster
+    make-iso.sh         Stage 0 bootable ISO remaster (dbus/polkit/consolekit2 +
+                        fonts + generated runit services, baked in by default)
+    fetch-pkg.sh        Fetch + extract a FreeBSD pkg closure into a rootdir
+    fetch-fonts.sh      Fetch Open Sans + Noto Color Emoji from Google Fonts
 tests/                  One test file per module
 Makefile                Build and test driver
 ```

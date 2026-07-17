@@ -1,0 +1,15 @@
+#!/usr/bin/env lua
+-- flash — CLI entry point.
+-- One job: put lib/ on the module path and hand off to cli.main.
+
+local script = arg and arg[0] or "flash"
+local dir = script:match("^(.*)[/\\][^/\\]*$") or "."
+package.path = dir .. "/lib/?.lua;" .. package.path
+
+local cli = require("cli")
+local deps = require("deps")
+
+local argv = {}
+for i = 1, #arg do argv[i] = arg[i] end
+
+os.exit(cli.main(argv, io.write, function(s) io.stderr:write(s) end, deps.get()))
