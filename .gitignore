@@ -1,0 +1,19 @@
+# Vendored upstream trees (fetched by tools/fetch-freebsd.sh)
+/vendor/
+
+# Build outputs
+/obj/
+/dist/
+
+# Test scratch space
+/tests/tmp/
+
+# Local staging output from `sunconfig build`
+/sunconfig-out/
+*.stage/
+
+# Editor droppings
+*.swp
+*~
+.DS_Store
+Thumbs.db

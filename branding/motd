@@ -1,0 +1,12 @@
+
+   .   \  |  /   .
+     .  \ | /  .
+   ~ ~ ((  )) ~ ~      SunshineBSD 0.1-CURRENT
+     '  / | \  '
+   '   /  |  \   '     https://sunshinebsd.org (placeholder)
+
+Welcome to SunshineBSD — an opinionated desktop BSD.
+
+ * Configuration lives in /etc/sunshine/*.lua  (run: sunconfig check)
+ * Services are supervised by runit            (run: sv status <name>)
+ * The system snapshots itself before changes  (rollback is one boot away)

@@ -1,0 +1,7 @@
+# SUNSHINE — SunshineBSD amd64 kernel configuration.
+#
+# Stage 0 policy: stay as close to GENERIC as possible so FreeBSD driver
+# compatibility is preserved. Divergence happens per-stage, not here.
+
+include GENERIC
+ident   SUNSHINE
