@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    name: make check (Lua ${{ matrix.lua }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        lua: ["5.4"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Lua and make
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua${{ matrix.lua }} make
+
+      - name: Run full check
+        run: make check LUA=lua${{ matrix.lua }}
+
+  shell-lint:
+    name: sh syntax check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse every shell script with sh -n
+        run: |
+          for f in tools/*.sh src/rc-compat/rc2runit tests/test_rc2runit.sh; do
+            echo "sh -n $f"
+            sh -n "$f"
+          done
