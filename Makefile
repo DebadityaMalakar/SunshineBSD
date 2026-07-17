@@ -27,7 +27,7 @@ QEMU     ?= qemu-system-x86_64
 QEMU_MEM ?= 4G
 QEMU_CPUS ?= 4
 IMAGE    ?= dist/sunshinebsd.qcow2
-ISO      ?= dist/sunshinebsd-0.1-CURRENT-amd64.iso
+ISO      ?= dist/sunshinebsd-0.2-CURRENT-amd64.iso
 
 LUA_SUITES = \
 	test-util \
@@ -40,7 +40,12 @@ LUA_SUITES = \
 	test-gen_runit \
 	test-gen_meta \
 	test-build \
-	test-cli
+	test-cli \
+	test-flesk_logo \
+	test-flesk_render \
+	test-flesk_info \
+	test-flesk_cli \
+	test-flesk_sysdeps
 
 SH_SUITES = test-rc2runit test-sunsnap test-zshrc
 

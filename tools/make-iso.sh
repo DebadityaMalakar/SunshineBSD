@@ -126,25 +126,36 @@ release_line=$(cat "$root_dir/branding/version")
 
 # uname branding: from-source builds get TYPE="SunshineBSD" compiled in
 # via brand-freebsd.sh, but this remastered ISO boots the upstream
-# binary kernel. FreeBSD uname(1) honors UNAME_* environment overrides
-# (see uname(1) ENVIRONMENT), so set them for every login shell.
-cat >> "$tree/etc/profile" <<'EOF'
-
-# SunshineBSD identity (added by tools/make-iso.sh)
-UNAME_s="SunshineBSD"; export UNAME_s
-UNAME_v="SunshineBSD 0.1-CURRENT (remastered FreeBSD kernel)"; export UNAME_v
+# binary kernel. FreeBSD uname(1) honors UNAME_* environment overrides,
+# so wrap the binary itself — profile-based exports would miss
+# non-login shells such as the installer's shell escape. UNAME_r stays
+# untouched because third-party software parses it for the underlying
+# FreeBSD release.
+if [ ! -f "$tree/usr/bin/uname.freebsd" ]; then
+    mv "$tree/usr/bin/uname" "$tree/usr/bin/uname.freebsd"
+fi
+cat > "$tree/usr/bin/uname" <<EOF
+#!/bin/sh
+# SunshineBSD uname wrapper (added by tools/make-iso.sh). The real
+# binary honors these documented environment overrides; existing
+# UNAME_* values set by the caller win.
+[ -z "\${UNAME_s:-}" ] && { UNAME_s="SunshineBSD"; export UNAME_s; }
+[ -z "\${UNAME_v:-}" ] && {
+    UNAME_v="$release_line (remastered FreeBSD-$VERSION kernel)"
+    export UNAME_v
+}
+exec /usr/bin/uname.freebsd "\$@"
 EOF
-cat >> "$tree/etc/csh.cshrc" <<'EOF'
+chmod 0555 "$tree/usr/bin/uname"
 
-# SunshineBSD identity (added by tools/make-iso.sh)
-setenv UNAME_s SunshineBSD
-setenv UNAME_v "SunshineBSD 0.1-CURRENT (remastered FreeBSD kernel)"
-EOF
+mkdir -p "$tree/boot/lua"
+cp "$root_dir/branding/loader/brand-sunshine.lua" "$tree/boot/lua/brand-sunshine.lua"
 
 cat >> "$tree/boot/loader.conf" <<'EOF'
 
 # --- SunshineBSD branding (added by tools/make-iso.sh) ---
 loader_menu_title="Welcome to SunshineBSD"
+loader_brand="sunshine"
 boot_multicons="YES"
 console="comconsole,vidconsole"
 EOF
@@ -172,6 +183,18 @@ chmod 0755 "$sbin/rc2runit"
 cp "$root_dir/src/sunsnap/sunsnap" "$sbin/sunsnap"
 chmod 0755 "$sbin/sunsnap"
 
+echo "make-iso: installing flesk"
+fshare="$tree/usr/local/share/flesk"
+mkdir -p "$fshare"
+cp "$root_dir/src/flesk/flesk" "$fshare/flesk.lua"
+cp -R "$root_dir/src/flesk/lib" "$fshare/lib"
+cat > "$sbin/flesk" <<'EOF'
+#!/bin/sh
+# SunshineBSD flesk launcher: uses the base-system Lua (flua).
+exec /usr/libexec/flua /usr/local/share/flesk/flesk.lua "$@"
+EOF
+chmod 0755 "$sbin/flesk"
+
 mkdir -p "$tree/etc/sunshine/zsh"
 cp "$root_dir/branding/zshrc" "$tree/etc/sunshine/zsh/zshrc"
 
@@ -190,7 +213,10 @@ if [ -z "$label" ]; then
 fi
 
 mkdir -p "$dist"
-out="$dist/sunshinebsd-0.1-CURRENT-$ARCH.iso"
+# Derive the filename from branding/version instead of a second hardcoded
+# copy, so a version bump can't leave the two out of sync.
+sunshine_ver=${release_line#SunshineBSD }
+out="$dist/sunshinebsd-$sunshine_ver-$ARCH.iso"
 echo "make-iso: building $out (label $label)"
 
 case "$bios_img" in

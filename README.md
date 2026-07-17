@@ -32,7 +32,11 @@ src/
         rc2runit        Wrap a FreeBSD rc.d script as a runit service
     sunsnap/
         sunsnap         Snapshot / boot-environment lifecycle tool (Stage 2)
+    flesk/
+        flesk           System-info banner (SunshineBSD's neofetch)
+        lib/            One module per responsibility
 branding/               SunshineBSD identity (motd, version, icon, zshrc)
+    loader/             Boot-loader Lua brand (ASCII banner)
 examples/
     etc-sunshine/       Example /etc/sunshine configuration
 tools/
@@ -81,6 +85,12 @@ lua src/sunconfig/sunconfig check -c examples/etc-sunshine
 lua src/sunconfig/sunconfig build -c examples/etc-sunshine -o /tmp/stage
 ```
 
+Try flesk, SunshineBSD's system-info banner:
+
+```
+lua src/flesk/flesk
+```
+
 Building the OS itself. World and kernel build on FreeBSD natively or on
 Linux — including WSL — via FreeBSD's official `tools/build/make.py`
 cross-build path; the bootable image needs a FreeBSD host with root.
@@ -109,10 +119,16 @@ Branding note: `tools/brand-freebsd.sh` rewrites `sys/conf/newvers.sh`
 in the vendored tree so the built system identifies as SunshineBSD
 (`uname -s`, boot banner, `SUNSHINE-` branch prefix) — the internal
 FreeBSD files themselves record that this is a fork. The remastered
-Stage 0 ISO boots the upstream binary kernel, so there `make iso` sets
-`UNAME_s`/`UNAME_v` overrides (honored by FreeBSD `uname(1)`) in the
-login environment instead; `UNAME_r` is left alone because third-party
-software parses it for the underlying FreeBSD release.
+Stage 0 ISO boots the upstream binary kernel, so there `make iso`
+replaces `/usr/bin/uname` with a wrapper that sets the documented
+`UNAME_s`/`UNAME_v` overrides before calling the real binary (kept as
+`uname.freebsd`) — this works in every shell, including the
+installer's non-login shell escape. `UNAME_r` is left alone because
+third-party software parses it for the underlying FreeBSD release. The
+boot-loader menu gets the same treatment: `make iso` installs
+`branding/loader/brand-sunshine.lua` as `/boot/lua/brand-sunshine.lua`
+and sets `loader_brand="sunshine"`, replacing the stock FreeBSD ASCII
+banner with a SunshineBSD one.
 
 `build` writes a staging tree (`etc/`, `service/`, `var/`) plus a
 `MANIFEST`; nothing is ever written outside the staging root. Applying a

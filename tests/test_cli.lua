@@ -24,7 +24,7 @@ T.suite("cli")
 T.case("version prints the version on stdout", function()
     local code, out, err = run({ "version" })
     T.eq(code, 0)
-    T.match(out, "sunconfig 0%.1%.0")
+    T.match(out, "sunconfig 0%.2%.0")
     T.eq(err, "")
 end)
 
