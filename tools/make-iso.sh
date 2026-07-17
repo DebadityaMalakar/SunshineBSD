@@ -41,7 +41,7 @@ for tool in curl bsdtar xorriso; do
     }
 done
 if command -v sha256sum >/dev/null 2>&1; then
-    sha256_of() { sha256sum "$1" | awk '{print $1}'; }
+    sha256_of() { sha256sum "$1" | cut -d ' ' -f 1; }
 elif command -v sha256 >/dev/null 2>&1; then
     sha256_of() { sha256 -q "$1"; }
 else
@@ -59,13 +59,15 @@ base_url="$MIRROR/releases/$ARCH/$ARCH/ISO-IMAGES/$numver"
 mkdir -p "$cache"
 if [ ! -f "$cache/$iso_name" ]; then
     echo "make-iso: downloading $base_url/$iso_name"
-    curl -fL --proto '=https' -o "$cache/$iso_name.part" "$base_url/$iso_name"
-    mv "$cache/$iso_name.part" "$cache/$iso_name"
+    # $$ suffix so two concurrent runs cannot clobber each other's download
+    curl -fL --proto '=https' -o "$cache/$iso_name.part.$$" "$base_url/$iso_name"
+    mv "$cache/$iso_name.part.$$" "$cache/$iso_name"
 fi
 echo "make-iso: fetching checksums"
 curl -fL --proto '=https' -o "$cache/$sum_name" "$base_url/$sum_name"
 
-want=$(awk -v f="$iso_name" '$0 ~ "\\(" f "\\)" { print $NF }' "$cache/$sum_name")
+# Checksum line format: SHA256 (FreeBSD-...iso) = <hash>
+want=$(grep -F "($iso_name)" "$cache/$sum_name" | sed -n 's/.*= *//p' | head -n 1)
 if [ -z "$want" ]; then
     echo "make-iso: $iso_name not found in $sum_name" >&2
     exit 1
