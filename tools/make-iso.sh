@@ -149,13 +149,14 @@ EOF
 chmod 0555 "$tree/usr/bin/uname"
 
 mkdir -p "$tree/boot/lua"
-cp "$root_dir/branding/loader/brand-sunshine.lua" "$tree/boot/lua/brand-sunshine.lua"
+cp "$root_dir/branding/loader/gfx-sunshine.lua" "$tree/boot/lua/gfx-sunshine.lua"
 
 cat >> "$tree/boot/loader.conf" <<'EOF'
 
 # --- SunshineBSD branding (added by tools/make-iso.sh) ---
 loader_menu_title="Welcome to SunshineBSD"
 loader_brand="sunshine"
+loader_logo="sunshine"
 boot_multicons="YES"
 console="comconsole,vidconsole"
 EOF
@@ -188,12 +189,16 @@ fshare="$tree/usr/local/share/flesk"
 mkdir -p "$fshare"
 cp "$root_dir/src/flesk/flesk" "$fshare/flesk.lua"
 cp -R "$root_dir/src/flesk/lib" "$fshare/lib"
-cat > "$sbin/flesk" <<'EOF'
+# /usr/bin, not /usr/local/sbin: like uname above, flesk needs to run
+# from the installer's shell escape, which execs a plain non-login
+# /bin/sh and so never sources /root/.profile's PATH (which does list
+# /usr/local/sbin, but only for a properly logged-in shell).
+cat > "$tree/usr/bin/flesk" <<'EOF'
 #!/bin/sh
 # SunshineBSD flesk launcher: uses the base-system Lua (flua).
 exec /usr/libexec/flua /usr/local/share/flesk/flesk.lua "$@"
 EOF
-chmod 0755 "$sbin/flesk"
+chmod 0755 "$tree/usr/bin/flesk"
 
 mkdir -p "$tree/etc/sunshine/zsh"
 cp "$root_dir/branding/zshrc" "$tree/etc/sunshine/zsh/zshrc"

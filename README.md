@@ -36,7 +36,7 @@ src/
         flesk           System-info banner (SunshineBSD's neofetch)
         lib/            One module per responsibility
 branding/               SunshineBSD identity (motd, version, icon, zshrc)
-    loader/             Boot-loader Lua brand (ASCII banner)
+    loader/             Boot-loader Lua brand (wordmark + mascot ASCII art)
 examples/
     etc-sunshine/       Example /etc/sunshine configuration
 tools/
@@ -119,16 +119,28 @@ Branding note: `tools/brand-freebsd.sh` rewrites `sys/conf/newvers.sh`
 in the vendored tree so the built system identifies as SunshineBSD
 (`uname -s`, boot banner, `SUNSHINE-` branch prefix) — the internal
 FreeBSD files themselves record that this is a fork. The remastered
-Stage 0 ISO boots the upstream binary kernel, so there `make iso`
-replaces `/usr/bin/uname` with a wrapper that sets the documented
-`UNAME_s`/`UNAME_v` overrides before calling the real binary (kept as
-`uname.freebsd`) — this works in every shell, including the
-installer's non-login shell escape. `UNAME_r` is left alone because
-third-party software parses it for the underlying FreeBSD release. The
-boot-loader menu gets the same treatment: `make iso` installs
-`branding/loader/brand-sunshine.lua` as `/boot/lua/brand-sunshine.lua`
-and sets `loader_brand="sunshine"`, replacing the stock FreeBSD ASCII
-banner with a SunshineBSD one.
+Stage 0 ISO boots the upstream binary kernel, so `make iso` has to
+apply that identity itself, and does so in ways that survive the
+installer's *non-login* shell escape (which execs a plain `/bin/sh`
+and never sources `/root/.profile` or `/etc/profile`):
+
+- `/usr/bin/uname` is replaced with a wrapper that sets the documented
+  `UNAME_s`/`UNAME_v` overrides before calling the real binary (kept as
+  `uname.freebsd`). `UNAME_r` is left alone because third-party
+  software parses it for the underlying FreeBSD release.
+- `flesk` is installed straight to `/usr/bin/flesk` rather than
+  `/usr/local/sbin`, for the same reason — the latter is only on
+  `PATH` for a shell that actually read a profile.
+- The boot-loader menu draws two graphics: `loader_brand` is the small
+  wordmark, `loader_logo` is the larger mascot beside the menu (stock
+  FreeBSD: a red orb). Both come from one file,
+  `branding/loader/gfx-sunshine.lua` — the loader resolves both names
+  through the same `gfx-<name>.lua` lookup, so a same-named brand and
+  logo split across two files silently lose the brand (confirmed by
+  booting a build that split them: the mascot rendered, the wordmark
+  reverted to stock FreeBSD). `make iso` installs the file under
+  `/boot/lua/` and sets `loader_brand="sunshine"` /
+  `loader_logo="sunshine"` in `loader.conf`.
 
 `build` writes a staging tree (`etc/`, `service/`, `var/`) plus a
 `MANIFEST`; nothing is ever written outside the staging root. Applying a
