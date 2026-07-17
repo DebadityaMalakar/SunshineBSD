@@ -9,26 +9,38 @@ kernel.
 > Build a secure, atomic, opinionated desktop OS on top.
 
 See [PLAN.md](PLAN.md) for the full staged roadmap. Current status:
-**Stage 0** (foundation) with early groundwork for **Stage 4** (runit) and
-**Stage 8** (Lua configuration).
+**Stage 0** (foundation) with early groundwork for **Stage 2** (ZFS
+snapshots/rollback), **Stage 4** (runit), and **Stage 8** (Lua
+configuration).
 
 ## Repository Layout
 
 ```
 PLAN.md                 Staged development plan
+CLAUDE.md               Project instructions and required reading
 DOCS/
+    ENGINEERING.MD      Code and testing rules for this repository
     LUA.MD              Lua configuration system design
     RUNIT.MD            runit service system design
-    ENGINEERING.MD      Code and testing rules for this repository
+    ZFS.MD              ZFS storage and rollback design
+    ZSH.MD              Default shell policy and configuration design
 src/
     sunconfig/          Lua configuration compiler (Stage 8)
         sunconfig       CLI entry point
         lib/            One module per responsibility
     rc-compat/
         rc2runit        Wrap a FreeBSD rc.d script as a runit service
-branding/               SunshineBSD identity (motd, version)
+    sunsnap/
+        sunsnap         Snapshot / boot-environment lifecycle tool (Stage 2)
+branding/               SunshineBSD identity (motd, version, icon, zshrc)
+examples/
+    etc-sunshine/       Example /etc/sunshine configuration
 tools/
-    fetch-freebsd.sh    Fetch the upstream FreeBSD source tree (Stage 0)
+    fetch-freebsd.sh    Fetch the pinned upstream FreeBSD source tree
+    brand-freebsd.sh    Mark the vendored tree as a SunshineBSD fork
+    build-os.sh         buildworld / buildkernel wrapper (FreeBSD or WSL)
+    make-image.sh       VM image build (FreeBSD host, needs root)
+    make-iso.sh         Stage 0 bootable ISO remaster
 tests/                  One test file per module
 Makefile                Build and test driver
 ```
@@ -58,7 +70,8 @@ Requires Lua 5.4 and make. On FreeBSD: `pkg install lua54 gmake`.
 ```
 make test          # run all Lua test suites (one process per suite)
 make test-schema   # run a single suite
-make check         # everything, including the sh-based rc2runit tests
+make check         # everything, including the sh-based suites
+                   #   (rc2runit, sunsnap, zshrc)
 ```
 
 Try the configuration compiler against the example config:
@@ -95,7 +108,11 @@ make wsl-kernel
 Branding note: `tools/brand-freebsd.sh` rewrites `sys/conf/newvers.sh`
 in the vendored tree so the built system identifies as SunshineBSD
 (`uname -s`, boot banner, `SUNSHINE-` branch prefix) — the internal
-FreeBSD files themselves record that this is a fork.
+FreeBSD files themselves record that this is a fork. The remastered
+Stage 0 ISO boots the upstream binary kernel, so there `make iso` sets
+`UNAME_s`/`UNAME_v` overrides (honored by FreeBSD `uname(1)`) in the
+login environment instead; `UNAME_r` is left alone because third-party
+software parses it for the underlying FreeBSD release.
 
 `build` writes a staging tree (`etc/`, `service/`, `var/`) plus a
 `MANIFEST`; nothing is ever written outside the staging root. Applying a

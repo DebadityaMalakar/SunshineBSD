@@ -1,17 +1,16 @@
-## `DOCS/LUA.md`
-
 # SunshineBSD Lua Configuration System
 
 ## Overview
 
 SunshineBSD uses Lua as its primary system configuration language.
 
-The goal is to provide a unified, readable, and programmable configuration
-layer without replacing the underlying Unix filesystem model.
+The goal is to provide a unified, readable, and programmable
+configuration layer without replacing the underlying Unix filesystem
+model.
 
-Lua is not intended to replace system binaries or become a mandatory runtime
-dependency for applications. It exists as a configuration and orchestration
-language.
+Lua is not intended to replace system binaries or become a mandatory
+runtime dependency for applications. It exists as a configuration and
+orchestration language.
 
 ## Philosophy
 
@@ -25,13 +24,15 @@ Traditional Unix systems distribute configuration across many files:
 
 SunshineBSD introduces a unified configuration layer:
 
-    Lua Configuration
-          |
-          v
-    Configuration Generator
-          |
-          v
-    Native Unix Configuration
+```
+Lua Configuration
+      |
+      v
+Configuration Generator
+      |
+      v
+Native Unix Configuration
+```
 
 The generated files remain readable and editable.
 
@@ -44,7 +45,7 @@ The generated files remain readable and editable.
 - No custom DSL
 - Minimal complexity
 
-## Non Goals
+## Non-Goals
 
 Lua configuration will not:
 
@@ -55,17 +56,16 @@ Lua configuration will not:
 
 ## Configuration Layout
 
-Example:
+Configuration lives in `/etc/sunshine/`, either as a single
+`sun.conf.lua` or split across topical files:
 
 ```
-
 /etc/sunshine/
-system.lua
-services.lua
-desktop.lua
-security.lua
-
-````
+    system.lua
+    services.lua
+    desktop.lua
+    security.lua
+```
 
 ## Example Configuration
 
@@ -77,7 +77,7 @@ system = {
     timezone = "Asia/Kolkata",
     locale = "en_US.UTF-8"
 }
-````
+```
 
 Generated:
 
@@ -86,11 +86,7 @@ Generated:
 /etc/localtime
 ```
 
----
-
-## Services
-
-Example:
+### Services
 
 ```lua
 services = {
@@ -100,13 +96,10 @@ services = {
 }
 ```
 
-The service manager converts this into runit service definitions.
+The generator converts this into runit service definitions
+(see DOCS/RUNIT.MD).
 
----
-
-## Desktop
-
-Example:
+### Desktop
 
 ```lua
 desktop = {
@@ -116,70 +109,56 @@ desktop = {
 }
 ```
 
----
+## Configuration Compiler
 
-# Configuration Compiler
+The configuration compiler, `sunconfig` (implemented in
+`src/sunconfig/`), is responsible for:
 
-The configuration compiler is responsible for:
-
-1. Loading Lua configuration
-2. Validating values
-3. Generating system configuration
+1. Loading Lua configuration inside a sandbox
+2. Validating values, collecting every error in one pass
+3. Generating system configuration into a staging tree
 4. Applying changes safely
 
 Pipeline:
 
 ```
-sun.lua
-
-    |
-    v
-
-sunconfig
-
-    |
-    v
-
-/etc
-/service
-/boot
+/etc/sunshine/*.lua
+      |
+      v
+   sunconfig
+      |
+      v
+/etc  /service  /boot
 ```
 
----
-
-# Safety
+## Safety
 
 Configuration changes are transactional.
 
 Before applying:
 
 ```
-Create ZFS snapshot
-
-zroot@suncfg-before
+sunsnap pre config
 ```
 
-Apply configuration.
+creates a ZFS safety point (see DOCS/ZFS.MD). Apply the generated
+configuration. If a failure occurs, roll back to the safety point.
 
-If failure occurs:
+Untrusted configuration is evaluated only inside a sandbox: no `io`,
+no `os`, no `require`, no bytecode, bounded instruction count
+(DOCS/ENGINEERING.MD, rule 3.8).
 
-```
-Rollback snapshot
-```
-
----
-
-# Future Integration
+## Future Integration
 
 Lua will eventually control:
 
-* Package preferences
-* Atomic update policies
-* KerrNil security policies
-* User permissions
-* Hardware profiles
+- Package preferences
+- Atomic update policies
+- KerrNil security policies
+- User permissions
+- Hardware profiles
 
-Example future:
+Example future configuration:
 
 ```lua
 security = {
@@ -188,18 +167,14 @@ security = {
 }
 ```
 
----
-
-# Summary
+## Summary
 
 Lua is the configuration language of SunshineBSD.
 
 It provides:
 
-* Simplicity of traditional Unix
-* Power of scripting
-* Safety of declarative configuration
+- The simplicity of traditional Unix
+- The power of scripting
+- The safety of declarative configuration
 
-Configuration should describe the system,
-not fight the user.
-
+Configuration should describe the system, not fight the user.
