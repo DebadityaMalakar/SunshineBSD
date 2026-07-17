@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="SunshineBSD sunflower">
+  <defs>
+    <!-- one petal, pointing up from the flower center (32,32) -->
+    <path id="petal" d="M32 3 C35.2 9 35.6 15.5 32 21 C28.4 15.5 28.8 9 32 3 Z"/>
+    <!-- one seed dot at the top of its ring; rings are built by rotation -->
+    <circle id="d1" cx="32" cy="29.2" r="0.85"/>
+    <circle id="d2" cx="32" cy="26.6" r="0.85"/>
+    <circle id="d3" cx="32" cy="24.1" r="0.8"/>
+  </defs>
+
+  <!-- leaves, tucked behind the petals into the lower corners -->
+  <g fill="#4E9A3C">
+    <path d="M26.5 42 C15 44.5 6.5 52 5.5 59 C14 60 23 53.5 27.5 45.5 C27.4 44.2 27 43 26.5 42 Z"/>
+    <path d="M37.5 42 C49 44.5 57.5 52 58.5 59 C50 60 41 53.5 36.5 45.5 C36.6 44.2 37 43 37.5 42 Z"/>
+  </g>
+  <g stroke="#3D7A2E" stroke-width="1" stroke-linecap="round" fill="none">
+    <path d="M25 46 C18 49 11.5 54 8.5 57.5"/>
+    <path d="M39 46 C46 49 52.5 54 55.5 57.5"/>
+  </g>
+
+  <!-- outer ring: 16 soft yellow petals -->
+  <g fill="#FFD257">
+    <use href="#petal"/>
+    <use href="#petal" transform="rotate(22.5 32 32)"/>
+    <use href="#petal" transform="rotate(45 32 32)"/>
+    <use href="#petal" transform="rotate(67.5 32 32)"/>
+    <use href="#petal" transform="rotate(90 32 32)"/>
+    <use href="#petal" transform="rotate(112.5 32 32)"/>
+    <use href="#petal" transform="rotate(135 32 32)"/>
+    <use href="#petal" transform="rotate(157.5 32 32)"/>
+    <use href="#petal" transform="rotate(180 32 32)"/>
+    <use href="#petal" transform="rotate(202.5 32 32)"/>
+    <use href="#petal" transform="rotate(225 32 32)"/>
+    <use href="#petal" transform="rotate(247.5 32 32)"/>
+    <use href="#petal" transform="rotate(270 32 32)"/>
+    <use href="#petal" transform="rotate(292.5 32 32)"/>
+    <use href="#petal" transform="rotate(315 32 32)"/>
+    <use href="#petal" transform="rotate(337.5 32 32)"/>
+  </g>
+
+  <!-- inner ring: 16 lighter petals, offset and scaled in -->
+  <g fill="#FFE28A" transform="rotate(11.25 32 32) translate(32 32) scale(0.75) translate(-32 -32)">
+    <use href="#petal"/>
+    <use href="#petal" transform="rotate(22.5 32 32)"/>
+    <use href="#petal" transform="rotate(45 32 32)"/>
+    <use href="#petal" transform="rotate(67.5 32 32)"/>
+    <use href="#petal" transform="rotate(90 32 32)"/>
+    <use href="#petal" transform="rotate(112.5 32 32)"/>
+    <use href="#petal" transform="rotate(135 32 32)"/>
+    <use href="#petal" transform="rotate(157.5 32 32)"/>
+    <use href="#petal" transform="rotate(180 32 32)"/>
+    <use href="#petal" transform="rotate(202.5 32 32)"/>
+    <use href="#petal" transform="rotate(225 32 32)"/>
+    <use href="#petal" transform="rotate(247.5 32 32)"/>
+    <use href="#petal" transform="rotate(270 32 32)"/>
+    <use href="#petal" transform="rotate(292.5 32 32)"/>
+    <use href="#petal" transform="rotate(315 32 32)"/>
+    <use href="#petal" transform="rotate(337.5 32 32)"/>
+  </g>
+
+  <!-- brown center -->
+  <circle cx="32" cy="32" r="11.5" fill="#7A4B22"/>
+  <circle cx="32" cy="32" r="9.8" fill="#5A371A"/>
+
+  <!-- seed dots: three rotated rings -->
+  <g fill="#9C6B3C">
+    <use href="#d1"/>
+    <use href="#d1" transform="rotate(33 32 32)"/>
+    <use href="#d1" transform="rotate(66 32 32)"/>
+    <use href="#d1" transform="rotate(99 32 32)"/>
+    <use href="#d1" transform="rotate(132 32 32)"/>
+    <use href="#d1" transform="rotate(165 32 32)"/>
+    <use href="#d1" transform="rotate(198 32 32)"/>
+    <use href="#d1" transform="rotate(231 32 32)"/>
+    <use href="#d1" transform="rotate(264 32 32)"/>
+    <use href="#d1" transform="rotate(297 32 32)"/>
+    <use href="#d1" transform="rotate(330 32 32)"/>
+  </g>
+  <g fill="#B07B45">
+    <use href="#d2" transform="rotate(22 32 32)"/>
+    <use href="#d2" transform="rotate(67 32 32)"/>
+    <use href="#d2" transform="rotate(112 32 32)"/>
+    <use href="#d2" transform="rotate(157 32 32)"/>
+    <use href="#d2" transform="rotate(202 32 32)"/>
+    <use href="#d2" transform="rotate(247 32 32)"/>
+    <use href="#d2" transform="rotate(292 32 32)"/>
+    <use href="#d2" transform="rotate(337 32 32)"/>
+  </g>
+  <g fill="#8A5A2E">
+    <use href="#d3"/>
+    <use href="#d3" transform="rotate(72 32 32)"/>
+    <use href="#d3" transform="rotate(144 32 32)"/>
+    <use href="#d3" transform="rotate(216 32 32)"/>
+    <use href="#d3" transform="rotate(288 32 32)"/>
+  </g>
+  <circle cx="32" cy="32" r="1.1" fill="#9C6B3C"/>
+</svg>

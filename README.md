@@ -1,5 +1,7 @@
 # SunshineBSD
 
+<img src="branding/icon.svg" width="96" align="right" alt="SunshineBSD sunflower icon">
+
 An opinionated, desktop-focused BSD operating system built on the FreeBSD
 kernel.
 
