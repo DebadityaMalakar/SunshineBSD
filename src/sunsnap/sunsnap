@@ -23,7 +23,7 @@
 
 set -u
 
-VERSION="0.3.0"
+VERSION="0.3.1"
 PREFIX="sunshine-"
 MAX_LABEL_LEN=32
 MAX_PRUNE=1000

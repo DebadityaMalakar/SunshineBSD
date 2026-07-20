@@ -43,8 +43,21 @@ src/
         pkgfetch        Resolve a FreeBSD pkg dependency closure (`resolve` subcommand)
         lib/            One module per responsibility
     flash/
-        flash           Lists SunshineBSD's own tooling + fetch-pkg.sh's installed packages
+        flash           Lists SunshineBSD's own tooling + fetch-pkg.sh's installed packages;
+                        `flash start ui` launches the desktop session;
+                        `flash start xfce` bypasses SDDM and launches Xfce
+                        directly (startxfce4) -- fallback for when SDDM won't
+                        come up; `flash enable <service>` clears a runit down-file
         lib/            One module per responsibility
+    sysaccounts/
+        provision-accounts  Idempotently creates the system accounts (messagebus,
+                        polkitd, sddm) fetch-pkg.sh's plain extraction never creates,
+                        plus supser, the default interactive login account (wheel +
+                        video, password "password" -- documented live/test default)
+        etc-overlay     Union-mounts a writable mdmfs layer over /etc when it isn't
+                        already writable (this project's live/install ISO boots
+                        root read-only off cd9660); provision-accounts needs this
+                        to run first, or pw(8) fails outright
 branding/               SunshineBSD identity (motd, version, icon, zshrc)
     loader/             Boot-loader Lua brand (wordmark + mascot ASCII art)
 examples/
@@ -54,9 +67,14 @@ tools/
     brand-freebsd.sh    Mark the vendored tree as a SunshineBSD fork
     build-os.sh         buildworld / buildkernel wrapper (FreeBSD or WSL)
     make-image.sh       VM image build (FreeBSD host, needs root)
-    make-iso.sh         Stage 0 bootable ISO remaster (dbus/polkit/consolekit2 +
-                        fonts + generated runit services, baked in by default)
+    make-iso.sh         Stage 0 ISO build orchestrator (dbus/polkit/consolekit2
+                        + xorg-server/sddm/xfce/thunar + fonts + generated
+                        runit services + runit boot chain, baked in by default)
+    iso/                The ISO build's single-job stages, run by make-iso.sh:
+                        fetch-base, brand-tree, stage-tooling, stage-packages,
+                        stage-boot-chain, pack-dist, build-iso, shared lib.sh
     fetch-pkg.sh        Fetch + extract a FreeBSD pkg closure into a rootdir
+                        (parallel, FETCH_PKG_JOBS batches at a time)
     fetch-fonts.sh      Fetch Open Sans + Noto Color Emoji from Google Fonts
 tests/                  One test file per module
 Makefile                Build and test driver
@@ -118,6 +136,28 @@ make world         # buildworld with the SunshineBSD overlay
 make kernel        # buildkernel KERNCONF=SUNSHINE
 make image         # produce dist/sunshinebsd.qcow2 (FreeBSD, needs root)
 make qemu          # boot the image in QEMU
+make iso           # remaster a bootable test ISO (sunshine.txz: xz, release)
+make iso-dev       # same, but sunshine.txz uses zstd -- fast boot-test loop
+```
+
+Testing the desktop session (Xfce/SDDM/Xorg) in QEMU needs **UEFI boot, not
+legacy BIOS** — confirmed live 2026-07-18: `xf86-video-scfb` only gets a
+usable framebuffer from `vt(4)`'s UEFI GOP path; under legacy BIOS boot
+`vt(4)` has nothing to hand it, Xorg reports "no screens found" no matter
+what else is configured. Point QEMU at OVMF firmware (bundled with most
+QEMU installs under `share/edk2-x86_64-code.fd` + a writable copy of
+`edk2-i386-vars.fd`) and add a serial console — the graphics console can
+still lock up completely if SDDM's greeter fails to render (confirmed:
+input stops reaching it entirely, unrecoverable short of resetting the
+VM), and a serial line is a separate tty unaffected by that:
+
+```
+qemu-system-x86_64 -m 6144 -smp 4 -cpu qemu64 -vga std \
+    -cdrom dist/sunshinebsd-0.3.1-BETA-amd64.iso -boot d \
+    -nic user,model=virtio-net-pci \
+    -drive if=pflash,format=raw,readonly=on,file=<path-to>/edk2-x86_64-code.fd \
+    -drive if=pflash,format=raw,file=<writable-copy-of>/edk2-i386-vars.fd \
+    -serial stdio
 ```
 
 On a Windows development host with WSL:
@@ -126,6 +166,8 @@ On a Windows development host with WSL:
 make wsl-check     # run the full test suite inside WSL (default distro:
 make wsl-world     #   FedoraLinux-43; override with WSL_DISTRO=...)
 make wsl-kernel
+make wsl-iso
+make wsl-iso-dev
 ```
 
 Branding note: `tools/brand-freebsd.sh` rewrites `sys/conf/newvers.sh`

@@ -1,0 +1,95 @@
+#!/bin/sh
+# stage-packages.sh -- stage the third-party desktop-session packages.
+# One job: fetch the pinned package set (plus full transitive dependency
+# closure) from the live FreeBSD pkg repo into $SUNISO_STAGE via
+# tools/fetch-pkg.sh, and write the xorg.conf.d snippet that makes the
+# fetched scfb driver actually get used.
+#
+# Internal build step -- run via tools/make-iso.sh, which exports every
+# SUNISO_* variable below.
+#
+# Package rationale (every entry verified against the live repo, dates
+# noted -- none of this is guessed):
+# - dbus + polkit + consolekit2: PLAN-03.MD's seat backend, chosen over
+#   elogind which has no FreeBSD package on any current branch. Run
+#   under rc(8), not runit -- see stage-boot-chain.sh.
+# - upower (origin sysutils/upower, confirmed real 2026-07-19): not a
+#   dependency of the xfce meta-port -- xfce4-power-manager degrades
+#   without it but logs D-Bus activation failures every session (seen
+#   live while debugging the session collapse).
+# - runit: supervises everything sunconfig generates into
+#   $SUNISO_STAGE/service (see stage-tooling.sh).
+# - xorg-server, sddm, xfce (meta-port x11-wm/xfce4), thunar: the
+#   PLAN-03.MD "XFCE + SDDM + Xorg" stage. The xfce meta-port does NOT
+#   pull in thunar on FreeBSD, unlike most Linux distros' Xfce
+#   metapackages -- confirmed 2026-07-18 against the live pkg repo.
+# - xf86-video-scfb: found live-testing this stage that xorg-server's
+#   own dependency list (17 packages, confirmed via the real repo)
+#   pulls in libdrm but NOT a single xf86-video-* driver -- X.Org video
+#   drivers are always separate loadable packages, never a server
+#   dependency. drm-kmod is deliberately deferred (see PLAN-03.MD's
+#   Open Questions), so without an explicit fallback driver Xorg had
+#   nothing to render with at all and died immediately ("Failed to
+#   read display number from pipe"). scfb is FreeBSD's
+#   hardware-independent syscons framebuffer driver -- the standard
+#   unaccelerated fallback for generic hardware/VMs.
+# - xf86-input-libinput (confirmed real 2026-07-18): X.Org input
+#   drivers are separate packages too, same as video drivers --
+#   confirmed NOT a dependency of xorg-server. Without it, Xorg has no
+#   way to translate the real mouse/keyboard into X input events at
+#   all, which live-tested as: SDDM's greeter renders once, then the
+#   pointer never moves again and nothing responds to input, forever --
+#   actually just Xorg and the greeter both quietly idling (confirmed
+#   via `top`: sddm-greeter-qt6 at 0.00% CPU in `select`) because there
+#   was genuinely nothing for either to receive. Unlike scfb, needs no
+#   xorg.conf.d forcing -- Xorg's input autoconfiguration picks up any
+#   available input driver for the keyboard/mouse device classes.
+# - xinit (origin x11/xinit, confirmed real 2026-07-18): ships
+#   /usr/local/bin/startx + xinit -- not a dependency of xorg-server or
+#   sddm, needed explicitly so `flash start xfce` can launch Xfce
+#   directly, bypassing SDDM entirely (see src/flash/lib/start.lua's
+#   plan_xfce).
+# - ncurses (origin devel/ncurses, confirmed real 2026-07-18): not
+#   consumed by anything yet, staged ahead of need for upcoming
+#   terminal-UI work.
+# - htop: user-requested system monitor, standalone.
+
+set -eu
+
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$here/lib.sh"
+
+require_env SUNISO_ROOT SUNISO_STAGE SUNISO_ARCH SUNISO_NUMVER SUNISO_LUA
+
+pkg_abi_rel="${SUNISO_NUMVER%%.*}"
+log "installing desktop-session packages (dbus, polkit, consolekit2, upower, runit, xorg-server, xf86-video-scfb, xf86-input-libinput, sddm, xfce, thunar, ncurses, xinit, htop)"
+PKG_ABI="FreeBSD:${pkg_abi_rel}:${SUNISO_ARCH}" LUA="$SUNISO_LUA" \
+    sh "$SUNISO_ROOT/tools/fetch-pkg.sh" "$SUNISO_STAGE" \
+    dbus polkit consolekit2 upower runit xorg-server xf86-video-scfb xf86-input-libinput sddm xfce thunar ncurses xinit htop
+
+# Fetching xf86-video-scfb is not the same as Xorg actually choosing to
+# use it: Xorg's autoconfiguration matches PCI vendor/device IDs against
+# known DDX drivers, and scfb is deliberately *not* PCI-ID-matched (it's
+# the syscons/vt-framebuffer fallback, meant for exactly the case where
+# no GPU-specific driver applies) -- so autoprobe can fail to find any
+# driver at all and Xorg exits immediately, which is exactly the failure
+# live-tested 2026-07-18 ("Failed to read display number from pipe"),
+# reproduced identically even after scfb was fetched. Forcing the driver
+# by name in a config snippet is the standard, universal fix (same
+# mechanism on every X.Org platform, not FreeBSD-specific) -- Xorg reads
+# every *.conf under xorg.conf.d in order, no restart or package
+# reinstall needed to pick it up.
+log "forcing the scfb video driver (xorg.conf.d)"
+mkdir -p "$SUNISO_STAGE/usr/local/etc/X11/xorg.conf.d"
+cat > "$SUNISO_STAGE/usr/local/etc/X11/xorg.conf.d/10-scfb.conf" <<'EOF'
+# Generated by the SunshineBSD ISO build (tools/iso/stage-packages.sh).
+# Forces Xorg onto xf86-video-scfb (FreeBSD's hardware-independent
+# syscons framebuffer driver) instead of relying on PCI-ID autoprobe,
+# which does not match scfb at all. See PLAN-03.MD's "Xorg video driver"
+# row for why this is the current unaccelerated default (drm-kmod is
+# deferred -- GPU accel row).
+Section "Device"
+    Identifier "Card0"
+    Driver "scfb"
+EndSection
+EOF

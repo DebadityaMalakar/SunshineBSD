@@ -34,22 +34,70 @@ local function native(path)
     return path
 end
 
--- os.rename(p, p) succeeds iff p exists; EACCES (13) also proves existence.
+-- io.open(p, "r") succeeding proves p exists -- true for both regular
+-- files and directories (opening a directory for read succeeds at the
+-- fopen() level on POSIX even though reading bytes from it would not;
+-- confirmed live 2026-07-18 on real FreeBSD, not just assumed). A pure
+-- read: unlike the os.rename(p, p) trick this used to use, it works on
+-- a read-only-mounted filesystem. That distinction is not academic --
+-- confirmed live the same day: the install/live medium mounts its root
+-- read-only, so os.rename(p, p) failed with EROFS (errno 30) for every
+-- path, existing or not, making fs.exists (and therefore fs.is_dir,
+-- mkdir_p, list_dir, remove_tree -- everything in this file routes
+-- through these two) report "does not exist" for a real, populated
+-- /etc/sunshine.
+--
+-- Windows is the mirror-image problem: its fopen() refuses to open a
+-- directory at all (confirmed: this repository's own test suite, run
+-- on this dev sandbox's native Windows lua, got io.open(a_real_dir, "r")
+-- returning nil), so the io.open check below only proves existence for
+-- regular files there. Not a real target platform for SunshineBSD
+-- itself, so it keeps the old rename-to-self check instead, which this
+-- dev sandbox's filesystem (never read-only the way the real target's
+-- live medium can be) has no trouble with.
 function M.exists(path)
     local ok, err = check_path("exists", path)
     if not ok then return nil, err end
-    local renamed, _, code = os.rename(path, path)
-    if renamed then return true end
-    if code == 13 then return true end
-    return false
+    if util.is_windows() then
+        local renamed, _, code = os.rename(path, path)
+        if renamed then return true end
+        if code == 13 then return true end
+        return false
+    end
+    local f = io.open(path, "r")
+    if not f then return false end
+    f:close()
+    return true
 end
 
--- A path followed by a separator only renames cleanly if it is a directory.
+-- is_dir(path): every directory contains "." referring to itself, so
+-- opening "path/." succeeds only when path really is a directory --
+-- appending a path component after a regular file is invalid (ENOTDIR),
+-- so io.open fails there instead. Confirmed live 2026-07-18 on real
+-- FreeBSD: succeeds for a real directory and for the same directory's
+-- "." entry, fails for a regular file with "/." appended and for a
+-- nonexistent path either way. Pure read, same read-only-filesystem
+-- safety as exists() above.
+--
+-- Windows does NOT reliably fail this the same way (confirmed: this
+-- repository's own test suite, run on this dev sandbox's native
+-- Windows lua, got io.open("somefile/.", "r") succeeding for a regular
+-- file) -- not a real target platform for SunshineBSD itself, so it
+-- keeps the old rename-to-self-with-trailing-separator check instead,
+-- which this dev sandbox's filesystem (never read-only the way the
+-- real target's live medium can be) has no trouble with.
 function M.is_dir(path)
     local ok, err = check_path("is_dir", path)
     if not ok then return nil, err end
-    if path:sub(-1) ~= "/" then path = path .. "/" end
-    return M.exists(path)
+    if util.is_windows() then
+        local probe = path:sub(-1) == "/" and path or (path .. "/")
+        return os.rename(probe, probe) == true
+    end
+    local probe = path:sub(-1) == "/" and (path .. ".") or (path .. "/.")
+    local f = io.open(probe, "r")
+    if not f then return false end
+    f:close()
+    return true
 end
 
 function M.read_file(path)

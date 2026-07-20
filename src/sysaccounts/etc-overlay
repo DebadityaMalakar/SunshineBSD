@@ -1,0 +1,86 @@
+#!/bin/sh
+# etc-overlay -- make a directory writable via a unionfs overlay when it
+# isn't. Named for its first use ($TARGET defaults to /etc), but fully
+# generic -- also used for /home and /root (see tools/make-iso.sh's
+# etc/rc.d/sunshine_etc_overlay, which calls this script three times).
+#
+# This project's live/install ISO mounts root directly off cd9660 (see
+# tools/make-iso.sh's etc/rc.d/sunshine_etc_overlay comment) -- genuinely
+# read-only at the media level, not a mount option choice. pw(8) (and so
+# provision-accounts) cannot write /etc/group or /etc/master.passwd there
+# at all, and homedir creation under /home fails the same way. Stock
+# FreeBSD already solves the equivalent problem for /var (see etc/rc.d/var:
+# varmfs="AUTO" mdmfs's a fresh filesystem directly over /var once a
+# writability probe fails) -- but /var's content is disposable
+# (mtree-regenerated), where /etc's is not (passwd, group, rc.conf, fstab,
+# every SunshineBSD file baked into the image), so a plain replace-mount
+# would wipe it. This uses a unionfs mount instead: mdmfs a fresh, empty,
+# writable filesystem at a scratch mountpoint, then unionfs-mount it OVER
+# $TARGET. Reads of anything not yet written fall through to the original
+# (still read-only) content automatically; writes land in the new upper
+# layer -- no need to pre-copy anything. Works identically for a target
+# with real pre-existing content (/etc) or one that starts out empty
+# (/home, which tools/make-iso.sh bakes in as an empty mountpoint since it
+# does not exist in the stock tree at all) -- an empty lower layer just
+# means every read is a fresh miss, same mechanism either way.
+#
+# One job: get $TARGET writable. Safe to run repeatedly -- a writability
+# probe short-circuits to a no-op once the overlay (or a genuinely
+# writable directory, e.g. a real install's ZFS root) is already there.
+#
+# usage: etc-overlay
+#
+# Environment:
+#   TARGET   directory to make writable (default: /etc; overridable for tests)
+#   UPPER    scratch mountpoint for the writable upper layer
+#            (default: /var/run/sunshine_etc_upper)
+#   MDMFS    mdmfs(8) binary to use (default: /sbin/mdmfs)
+#   MOUNT    mount(8) binary to use (default: /sbin/mount)
+#   MFSSIZE  size passed to mdmfs -s (default: 16m)
+
+set -eu
+
+if [ "$#" -ne 0 ]; then
+    echo "usage: etc-overlay" >&2
+    exit 2
+fi
+
+TARGET="${TARGET:-/etc}"
+UPPER="${UPPER:-/var/run/sunshine_etc_upper}"
+MDMFS="${MDMFS:-/sbin/mdmfs}"
+MOUNT="${MOUNT:-/sbin/mount}"
+MFSSIZE="${MFSSIZE:-16m}"
+
+probe="$TARGET/.sunshine-rw-test"
+
+if mkdir "$probe" 2>/dev/null; then
+    rmdir "$probe"
+    echo "etc-overlay: $TARGET is already writable"
+    exit 0
+fi
+
+command -v "$MDMFS" >/dev/null 2>&1 || {
+    echo "etc-overlay: mdmfs binary not found: $MDMFS" >&2
+    exit 1
+}
+command -v "$MOUNT" >/dev/null 2>&1 || {
+    echo "etc-overlay: mount binary not found: $MOUNT" >&2
+    exit 1
+}
+
+echo "etc-overlay: $TARGET is read-only, mounting a writable overlay"
+
+mkdir -p "$UPPER" || {
+    echo "etc-overlay: failed to create mountpoint $UPPER" >&2
+    exit 1
+}
+"$MDMFS" -s "$MFSSIZE" md "$UPPER" || {
+    echo "etc-overlay: failed to create the memory filesystem at $UPPER" >&2
+    exit 1
+}
+"$MOUNT" -t unionfs -o noatime "$UPPER" "$TARGET" || {
+    echo "etc-overlay: failed to union-mount $UPPER over $TARGET" >&2
+    exit 1
+}
+
+echo "etc-overlay: done"

@@ -19,31 +19,39 @@ local REGISTRY = {
         command = "/usr/sbin/moused -f",
         description = "console mouse daemon (foreground)",
     },
-    dbus = {
-        command = "/usr/local/bin/dbus-daemon --system --nofork",
-        description = "D-Bus system message bus",
-    },
-    -- Path and flag verified 2026-07-18 against the real FreeBSD:14:amd64
-    -- pkg repo (sysutils/polkit 127): +MANIFEST lists the daemon at
-    -- /usr/local/lib/polkit-1/polkitd (not libexec), and --no-debug is a
-    -- real flag embedded in the binary. polkit ships no rc.d script
-    -- upstream (it's normally D-Bus-activated); running it as a
-    -- persistent supervised service instead is the same choice Void/
-    -- Artix runit make for polkitd.
-    polkit = {
-        command = "/usr/local/lib/polkit-1/polkitd --no-debug",
-        description = "polkit privilege-escalation authority (foreground, needs dbus)",
-    },
+    -- dbus/polkit/consolekit2 moved OFF this runit-managed catalog
+    -- entirely 2026-07-19: they're foundational prerequisites nearly
+    -- everything else needs, and bootstrapping them through runit meant
+    -- also bootstrapping runsvdir itself, which only rc(8) normally
+    -- starts -- real, extra fragility for services that don't need
+    -- runit's per-session flexibility at all (they start once at boot
+    -- and just stay up). Now started directly by rc(8): dbus via its own
+    -- real upstream rc.d script, polkit/consolekit2 via
+    -- tools/make-iso.sh-written ones (neither ships one upstream) --
+    -- see PLAN-03.MD's Decisions section. sddm (below) still needs all
+    -- three, just no longer waits on flash to bootstrap runit for them.
     -- Verified 2026-07-18 against the real FreeBSD:14:amd64 pkg repo
-    -- (sysutils/consolekit2 2.0.0_1): daemon is /usr/local/sbin/
-    -- console-kit-daemon; the binary forks by default ("Could not
-    -- daemonize: %s") and --no-daemon is a real embedded flag to keep it
-    -- foreground. elogind was tried first (see PLAN-03.MD) but does not
-    -- exist as a FreeBSD package on any current branch (13/14/15
-    -- checked) -- only consolekit2 and seatd (Wayland-only) do.
-    consolekit2 = {
-        command = "/usr/local/sbin/console-kit-daemon --no-daemon",
-        description = "seat/session tracking (foreground, needs dbus)",
+    -- (x11/sddm 0.21.0.36_3): binary is /usr/local/bin/sddm; the port's
+    -- own rc.d script (usr/local/etc/rc.d/sddm) invokes it directly with
+    -- no daemonize flag and backgrounds it itself with a shell `&` only
+    -- because rc.d needs that -- runit's `run` contract already wants
+    -- exactly this foreground shape (matches PLAN-03.MD's own sketch).
+    -- Requires the "sddm" system user/group (uid/gid 219) that sddm's
+    -- pre-install script would normally create; see
+    -- src/sysaccounts/provision-accounts, which fetch-pkg.sh's plain
+    -- extract-only install bypasses.
+    --
+    -- QT_QUICK_BACKEND=software: SDDM's greeter is a Qt Quick (QML) app
+    -- that wants a working OpenGL context by default. This project has no
+    -- GPU acceleration yet on purpose (xf86-video-scfb is a plain
+    -- unaccelerated framebuffer driver; drm-kmod is still deferred, see
+    -- PLAN-03.MD Open Questions). Live-tested 2026-07-18: without this,
+    -- the greeter stayed alive holding the VT/keyboard but painted
+    -- nothing -- a black screen indistinguishable from a hang. Matches
+    -- the same fix in src/flash/lib/start.lua's unsupervised launch path.
+    sddm = {
+        command = "/usr/bin/env QT_QUICK_BACKEND=software /usr/local/bin/sddm",
+        description = "SDDM display/login manager (foreground, needs dbus+polkit+consolekit2+Xorg)",
     },
     bluetooth = {
         command = "/usr/sbin/hcsecd -d",

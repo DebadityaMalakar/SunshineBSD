@@ -1,0 +1,150 @@
+#!/bin/sh
+# provision-accounts -- idempotently create the system accounts/groups that
+# SunshineBSD's fetch-pkg.sh-installed packages need but never get, plus the
+# default interactive login account SDDM needs something to show/log into.
+#
+# tools/fetch-pkg.sh is a plain archive extraction (see its header comment):
+# it never runs a fetched package's own pre-install pw(8) script, so the
+# dedicated system users those packages expect are simply missing on a
+# SunshineBSD image. Each service-account entry below mirrors the real
+# upstream pre-install script byte for byte (uid/gid/home/shell), verified
+# 2026-07-18 against the live FreeBSD:14:amd64 pkg repo's +MANIFEST for
+# devel/dbus, sysutils/polkit, and x11/sddm.
+#
+# The "supser" entry is a different kind of account entirely: SDDM (like
+# every mainstream display manager) deliberately hides root from its user
+# picker by default -- confirmed live 2026-07-18, an empty greeter carousel
+# is that filtering working as designed, not a bug -- so there is nothing
+# to select or log into without a real, non-root, password-having account.
+# "password" is a deliberate, openly-documented default for this live/test
+# image, the same way live-CD distros ship well-known default credentials;
+# it is not a secret and must never be treated as one on a real install.
+#
+# D-Bus's machine-id used to also be generated here, but as of 2026-07-19
+# dbus runs under its own real upstream rc.d script directly (see
+# tools/make-iso.sh and PLAN-03.MD's Decisions section) instead of a
+# runit service exec'd straight from registry.lua -- that script's own
+# start_precmd already does `mkdir -p /var/lib/dbus; dbus-uuidgen
+# --ensure` before dbus-daemon starts, so duplicating it here would just
+# be redundant.
+#
+# One job: reconcile these accounts. Meant to run once per boot, before
+# runit starts supervising the services that need them (see
+# etc/rc.d/sunshine_provision, written by tools/make-iso.sh). Safe to run
+# repeatedly -- every step checks before acting.
+#
+# usage: provision-accounts
+#
+# Environment:
+#   PW  pw(8) binary to use (default: /usr/sbin/pw; overridable for tests)
+
+set -eu
+
+if [ "$#" -ne 0 ]; then
+    echo "usage: provision-accounts" >&2
+    exit 2
+fi
+
+PW="${PW:-/usr/sbin/pw}"
+INSTALL="${INSTALL:-install}"
+
+command -v "$PW" >/dev/null 2>&1 || {
+    echo "provision-accounts: pw binary not found: $PW" >&2
+    exit 1
+}
+
+# name:uid:gid:home:shell:comment:extra_groups:password
+# extra_groups is a comma-separated list ("" if none); password is set at
+# creation time via pw's stdin (-h 0) and left empty ("" -> locked/no
+# interactive login) for every service account -- they must never accept a
+# password login.
+accounts="messagebus:556:556:/nonexistent:/usr/sbin/nologin:D-BUS Daemon User::
+polkitd:565:565:/var/empty:/usr/sbin/nologin:Polkit Daemon User::
+sddm:219:219:/var/lib/sddm:/usr/sbin/nologin:SDDM Display Manager user:video:
+supser:1001:1001:/home/supser:/bin/sh:SunshineBSD default user:wheel,video:password"
+
+ensure_group() { # name gid
+    name="$1"; gid="$2"
+    if "$PW" groupshow "$name" >/dev/null 2>&1; then
+        echo "provision-accounts: group '$name' already exists"
+        return 0
+    fi
+    echo "provision-accounts: creating group '$name' (gid $gid)"
+    "$PW" groupadd "$name" -g "$gid" || {
+        echo "provision-accounts: failed to create group '$name'" >&2
+        return 1
+    }
+}
+
+ensure_user() { # name uid gid home shell comment password
+    name="$1"; uid="$2"; gid="$3"; home="$4"; shell="$5"; comment="$6"; password="$7"
+    if "$PW" usershow "$name" >/dev/null 2>&1; then
+        echo "provision-accounts: user '$name' already exists"
+        return 0
+    fi
+    echo "provision-accounts: creating user '$name' (uid $uid)"
+    if [ -n "$password" ]; then
+        echo "$password" | "$PW" useradd "$name" -u "$uid" -g "$gid" -c "$comment" -d "$home" -s "$shell" -h 0 || {
+            echo "provision-accounts: failed to create user '$name'" >&2
+            return 1
+        }
+    else
+        "$PW" useradd "$name" -u "$uid" -g "$gid" -c "$comment" -d "$home" -s "$shell" || {
+            echo "provision-accounts: failed to create user '$name'" >&2
+            return 1
+        }
+    fi
+}
+
+# /nonexistent and /var/empty are real base-system sentinel directories that
+# must never be created or owned by a service account (matches messagebus's
+# and polkitd's own upstream pre-install scripts, which skip homedir
+# creation entirely for those two).
+ensure_homedir() { # name home
+    name="$1"; home="$2"
+    case "$home" in
+        /nonexistent|/var/empty) return 0 ;;
+    esac
+    if [ -d "$home" ]; then
+        return 0
+    fi
+    echo "provision-accounts: creating home directory $home for '$name'"
+    "$INSTALL" -d -o "$name" -g "$name" "$home" || {
+        echo "provision-accounts: failed to create $home" >&2
+        return 1
+    }
+}
+
+ensure_group_member() { # name group
+    name="$1"; group="$2"
+    members=$("$PW" groupshow "$group" 2>/dev/null | cut -d: -f4) || {
+        echo "provision-accounts: group '$group' does not exist" >&2
+        return 1
+    }
+    if echo "$members" | tr ',' '\n' | grep -qx "$name"; then
+        echo "provision-accounts: '$name' already in group '$group'"
+        return 0
+    fi
+    echo "provision-accounts: adding '$name' to group '$group'"
+    "$PW" groupmod "$group" -m "$name" || {
+        echo "provision-accounts: failed to add '$name' to group '$group'" >&2
+        return 1
+    }
+}
+
+echo "$accounts" | while IFS=: read -r name uid gid home shell comment extra_groups password; do
+    [ -n "$name" ] || continue
+    ensure_group "$name" "$gid"
+    ensure_user "$name" "$uid" "$gid" "$home" "$shell" "$comment" "$password"
+    ensure_homedir "$name" "$home"
+    if [ -n "$extra_groups" ]; then
+        old_ifs="$IFS"
+        IFS=','
+        for group in $extra_groups; do
+            ensure_group_member "$name" "$group"
+        done
+        IFS="$old_ifs"
+    fi
+done
+
+echo "provision-accounts: done"

@@ -8,6 +8,9 @@
 # Test scratch space
 /tests/tmp/
 
+# Local package-inspection scratch (live-debug sessions)
+/.scratch-pkg-inspect/
+
 # Local staging output from `sunconfig build`
 /sunconfig-out/
 *.stage/
