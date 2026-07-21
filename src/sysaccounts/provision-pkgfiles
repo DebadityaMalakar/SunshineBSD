@@ -89,6 +89,34 @@ pkg_modes="libexec/dbus-daemon-launch-helper:root:messagebus:4750
 bin/pkexec:root:wheel:4755
 lib/polkit-1/polkit-agent-helper-1:root:wheel:4755"
 
+# Directory modes, same story as the files above: read from polkit's real
+# +MANIFEST on 2026-07-21. polkit refuses to load rules from a rules.d it
+# does not consider trustworthy, and extraction leaves these world-
+# readable and root-owned instead of polkitd:wheel 0700 -- which matters
+# now that the build ships a rules file in there (the shutdown/restart
+# rules x11-wm/xfce4-session's own pkg-message asks for; see
+# tools/iso/stage-packages.sh).
+pkg_dir_modes="etc/polkit-1/rules.d:polkitd:wheel:0700
+share/polkit-1/rules.d:polkitd:wheel:0700"
+
+echo "$pkg_dir_modes" | while IFS=: read -r rel owner group mode; do
+    [ -n "$rel" ] || continue
+    path="$LOCALBASE/$rel"
+    if [ ! -d "$path" ]; then
+        echo "provision-pkgfiles: $path not installed, skipping"
+        continue
+    fi
+    echo "provision-pkgfiles: setting $owner:$group mode $mode on $path"
+    "$CHOWN" "$owner:$group" "$path" || {
+        echo "provision-pkgfiles: chown failed for $path" >&2
+        exit 1
+    }
+    "$CHMOD" "$mode" "$path" || {
+        echo "provision-pkgfiles: chmod failed for $path" >&2
+        exit 1
+    }
+done || failures=$((failures + 1))
+
 echo "$pkg_modes" | while IFS=: read -r rel owner group mode; do
     [ -n "$rel" ] || continue
     path="$LOCALBASE/$rel"

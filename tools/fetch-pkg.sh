@@ -64,7 +64,7 @@ mkdir -p "$cache" "$tree"
 site="$cache/packagesite-$(echo "$ABI" | tr ':' '_').yaml"
 if [ ! -f "$site" ]; then
     echo "fetch-pkg: downloading package index for $ABI"
-    curl -fL --proto '=https' -o "$cache/packagesite.pkg.$$" "$MIRROR/$ABI/latest/packagesite.pkg"
+    curl -fL --proto '=https' --connect-timeout 15 --retry 2         --retry-delay 3 --retry-max-time 120         -o "$cache/packagesite.pkg.$$" "$MIRROR/$ABI/latest/packagesite.pkg"
     bsdtar -xOf "$cache/packagesite.pkg.$$" packagesite.yaml > "$site.$$"
     rm -f "$cache/packagesite.pkg.$$"
     mv "$site.$$" "$site"
@@ -92,7 +92,7 @@ fetch_one() { # name repopath version
     name="$1"; repopath="$2"; version="$3"
     pkgfile="$cache/$(basename "$repopath")"
     if [ ! -f "$pkgfile" ]; then
-        if ! curl -fL --proto '=https' -o "$pkgfile.$$.$name" "$MIRROR/$ABI/latest/$repopath"; then
+        if ! curl -fL --proto '=https' --connect-timeout 15 --retry 2             --retry-delay 3 --retry-max-time 120             -o "$pkgfile.$$.$name" "$MIRROR/$ABI/latest/$repopath"; then
             echo "fetch-pkg: download failed: $name" >"$fail_dir/$name"
             return 1
         fi

@@ -143,6 +143,9 @@ run() {
 reset_db
 echo "video:*:44:" >> "$BASE/db/groups.txt"
 echo "wheel:*:0:root" >> "$BASE/db/groups.txt"
+# operator is a real base-system group (gid 5); the polkit shutdown/restart
+# rules the ISO ships authorize that group, so supser must join it.
+echo "operator:*:5:" >> "$BASE/db/groups.txt"
 
 run > "$BASE/out.txt" 2>&1
 check "runs cleanly against a fresh account database" $?
@@ -176,6 +179,8 @@ grep "^wheel:" "$BASE/db/groups.txt" | grep -q ",supser$\|:supser$"
 check "adds supser to the wheel group" $?
 grep "^video:" "$BASE/db/groups.txt" | grep -q ",supser$\|:supser$"
 check "adds supser to the video group (in addition to sddm)" $?
+grep "^operator:" "$BASE/db/groups.txt" | grep -q ",supser$\|:supser$"
+check "adds supser to the operator group (polkit shutdown/restart rules)" $?
 
 # --- homedir handling ------------------------------------------------------
 # Real filesystem side effects only ever go through the fake $INSTALL, never
@@ -213,6 +218,9 @@ check "second run reports group membership already present" $?
 reset_db
 echo "video:*:44:" >> "$BASE/db/groups.txt"
 echo "wheel:*:0:root" >> "$BASE/db/groups.txt"
+# operator is a real base-system group (gid 5); the polkit shutdown/restart
+# rules the ISO ships authorize that group, so supser must join it.
+echo "operator:*:5:" >> "$BASE/db/groups.txt"
 echo "messagebus:*:556:" >> "$BASE/db/groups.txt"
 
 run > "$BASE/out3.txt" 2>&1

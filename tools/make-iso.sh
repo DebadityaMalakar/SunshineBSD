@@ -31,7 +31,7 @@
 # usage: tools/make-iso.sh
 #
 # Environment:
-#   FREEBSD_ISO_VERSION    upstream release to remaster (default: 14.3-RELEASE)
+#   FREEBSD_ISO_VERSION    upstream release to remaster (default: 14.4-RELEASE)
 #   FREEBSD_ISO_ARCH       architecture (default: amd64)
 #   FREEBSD_ISO_FLAVOR     disc1 | bootonly | dvd1 (default: disc1)
 #   FREEBSD_ISO_MIRROR     base URL (default: https://download.freebsd.org)
@@ -52,7 +52,13 @@ root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
 # --- inputs, validated before any real work ------------------------------
 
-SUNISO_VERSION="${FREEBSD_ISO_VERSION:-14.3-RELEASE}"
+# 14.4-RELEASE (bumped from 14.3, 2026-07-21): the FreeBSD:14 pkg repo
+# builds its kernel modules -- drm-61-kmod/i915kms in particular --
+# against __FreeBSD_version 1404000 (14.4), so the remastered kernel
+# must be 14.4 for the DRM kmod to load. Verified live 2026-07-21 that
+# FreeBSD-14.4-RELEASE-amd64-disc1.iso + its CHECKSUM.SHA256 exist on
+# download.freebsd.org before bumping.
+SUNISO_VERSION="${FREEBSD_ISO_VERSION:-14.4-RELEASE}"
 SUNISO_ARCH="${FREEBSD_ISO_ARCH:-amd64}"
 SUNISO_FLAVOR="${FREEBSD_ISO_FLAVOR:-disc1}"
 SUNISO_MIRROR="${FREEBSD_ISO_MIRROR:-https://download.freebsd.org}"

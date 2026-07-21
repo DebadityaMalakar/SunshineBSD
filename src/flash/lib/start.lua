@@ -19,18 +19,17 @@ M.SDDM_SERVICE = "/service/sddm"
 -- deps.exists -- supervise/ok is a FIFO, and opening one for reading
 -- (what deps.exists does) blocks forever with no writer present.
 M.SDDM_SUPERVISE_OK = M.SDDM_SERVICE .. "/supervise/ok"
-M.SDDM = "/usr/local/bin/sddm"
--- SDDM's greeter is a Qt Quick (QML) app; Qt Quick's default scene graph
--- wants a working OpenGL context. This project has zero GPU acceleration
--- right now on purpose -- xf86-video-scfb is a plain unaccelerated
--- framebuffer driver, and drm-kmod (the real Intel/AMD GL path) is still
--- deliberately deferred (see PLAN-03.MD Open Questions). Live-tested
--- 2026-07-18: without this, the greeter process stays alive (X keeps
--- running, VT/keyboard stay grabbed) but paints nothing at all -- a black
--- screen indistinguishable from a hang, not a crash. QT_QUICK_BACKEND=
--- software forces Qt Quick's software rasterizer instead of requiring GL.
-M.QT_QUICK_ENV = "QT_QUICK_BACKEND=software"
-M.ENV_BIN = "/usr/bin/env"
+-- sunshine-sddm (src/sysaccounts/sddm-launch) rather than sddm itself:
+-- SDDM's greeter is a Qt Quick (QML) app whose default scene graph wants
+-- a working OpenGL context. Live-tested 2026-07-18 with no GPU
+-- acceleration: the greeter process stays alive (X keeps running,
+-- VT/keyboard stay grabbed) but paints nothing at all -- a black screen
+-- indistinguishable from a hang, not a crash; QT_QUICK_BACKEND=software
+-- fixed it. Since 2026-07-21 acceleration is real when the hardware
+-- supports it (i915kms via sunshine-provision-gpu), so the launcher
+-- picks per boot: hardware GL when /dev/dri/card* exists, the software
+-- rasterizer fallback otherwise. It execs sddm, staying foreground.
+M.SDDM_LAUNCH = "/usr/local/sbin/sunshine-sddm"
 
 M.SH = "/bin/sh"
 M.RUNSVDIR = "/usr/local/sbin/runsvdir"
@@ -92,12 +91,29 @@ end
 -- mounts its own /usr/local overlay when the media is read-only.
 M.PKGFILES = "/usr/local/sbin/sunshine-provision-pkgfiles"
 
+-- provision-procfs mounts procfs(5) on /proc, which nothing in FreeBSD's
+-- base does but a lot of desktop software assumes (copied from
+-- sysutils/desktop-installer, which mounts it for every desktop it
+-- installs). Cheap and idempotent, so it runs first.
+M.PROCFS = "/usr/local/sbin/sunshine-provision-procfs"
+
+-- provision-gpu decides hardware vs software rendering for the session
+-- about to start: it probes for an Intel GPU, kldloads i915kms, and
+-- rewrites the Xorg driver snippet (modesetting when a KMS device
+-- attached, scfb fallback otherwise). rc(8) runs it via
+-- etc/rc.d/sunshine_provision on a real boot; the unsupervised
+-- shell-escape path has to do it by hand here, synchronously, before
+-- any X server starts. Idempotent -- when nothing changed it rewrites
+-- nothing.
+M.GPU = "/usr/local/sbin/sunshine-provision-gpu"
+
 -- Returns just the inner shell command (no "sh -c"/quoting of its own --
 -- callers pass this as one argv element; deps.exec's own shell_quote
 -- wraps it in single quotes exactly once when building the real command
 -- line).
 local function background_runsvdir_then_exec(target_cmd)
-    return ensure_service_writable() .. "; " .. M.PKGFILES .. "; "
+    return ensure_service_writable() .. "; " .. M.PROCFS .. "; "
+        .. M.PKGFILES .. "; " .. M.GPU .. "; "
         .. M.RUNSVDIR .. " " .. M.SERVICE_DIR
         .. " >" .. M.RUNSVDIR_LOG .. " 2>&1 & exec " .. target_cmd
 end
@@ -124,11 +140,10 @@ function M.plan(is_supervised)
             argv = { M.SV, "up", M.SDDM_SERVICE },
         }
     end
-    local sddm_cmd = M.ENV_BIN .. " " .. M.QT_QUICK_ENV .. " " .. M.SDDM
     return {
         description = "runit is not managing sddm here -- starting runsvdir "
             .. "then launching sddm directly (unsupervised)",
-        argv = { M.SH, "-c", background_runsvdir_then_exec(sddm_cmd) },
+        argv = { M.SH, "-c", background_runsvdir_then_exec(M.SDDM_LAUNCH) },
     }
 end
 

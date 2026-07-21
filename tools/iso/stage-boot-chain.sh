@@ -125,7 +125,7 @@ cat > "$SUNISO_STAGE/etc/rc.d/sunshine_provision" <<'EOF'
 #!/bin/sh
 #
 # PROVIDE: sunshine_provision
-# REQUIRE: FILESYSTEMS sunshine_etc_overlay
+# REQUIRE: FILESYSTEMS sunshine_etc_overlay ldconfig
 # BEFORE: dbus runsvdir
 # KEYWORD: shutdown
 #
@@ -143,6 +143,36 @@ cat > "$SUNISO_STAGE/etc/rc.d/sunshine_provision" <<'EOF'
 # pw(8) needs a writable /etc, which on this project's read-only-root
 # live ISO only exists once that overlay is mounted (provision-pkgfiles
 # mounts its own /usr/local overlay).
+#
+# provision-procfs first (2026-07-21): mounts procfs(5) on /proc and adds
+# the fstab entry. Nothing in FreeBSD's base mounts /proc, but a lot of
+# desktop software assumes it -- FreeBSD's own sysutils/desktop-installer
+# does this unconditionally for every desktop it supports (its
+# procfs_config()), which is what this copies. Independent of the other
+# steps, so it goes first and cheapest.
+#
+# provision-gpu last (2026-07-21): probes for an Intel GPU, kldloads
+# i915kms, and rewrites the Xorg driver snippet to modesetting (hardware
+# rendering) or scfb (software fallback) to match what attached. Needs
+# nothing from the other two steps, but must also finish before runsvdir
+# starts supervising sddm, so it rides the same BEFORE constraint.
+#
+# REQUIRE: ldconfig is load-bearing, confirmed live 2026-07-21 by
+# capturing a full boot on the serial console. provision-pkgfiles builds
+# its caches by running the packages' OWN tools out of /usr/local/bin,
+# and every one of them is dynamically linked against /usr/local/lib.
+# etc/rc.d/ldconfig is what adds /usr/local/lib to the runtime linker's
+# hints file; without REQUIREing it, rcorder put this script earlier and
+# every single tool died at exec time --
+#   ld-elf.so.1: Shared object "libglib-2.0.so.0" not found,
+#       required by "gdk-pixbuf-query-loaders"
+# -- so gschemas.compiled and the pixbuf loader cache were never built
+# on a real boot, and the Xfce session then aborted seconds after login
+# exactly as it did before provision-pkgfiles existed (fatal libwnck
+# assertion, at-spi killed by SIGTRAP). It looked fixed because the
+# 2026-07-19 verification ran provision-pkgfiles from the installer's
+# shell escape (flash start), where rc(8) -- and so ldconfig -- had
+# already run. The rc(8) boot path itself was never exercised until now.
 
 . /etc/rc.subr
 
@@ -153,8 +183,10 @@ stop_cmd=":"
 
 sunshine_provision_start()
 {
+	/usr/local/sbin/sunshine-provision-procfs
 	/usr/local/sbin/sunshine-provision-accounts
 	/usr/local/sbin/sunshine-provision-pkgfiles
+	/usr/local/sbin/sunshine-provision-gpu
 }
 
 load_rc_config "$name"

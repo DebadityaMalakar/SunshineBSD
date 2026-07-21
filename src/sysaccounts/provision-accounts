@@ -61,7 +61,7 @@ command -v "$PW" >/dev/null 2>&1 || {
 accounts="messagebus:556:556:/nonexistent:/usr/sbin/nologin:D-BUS Daemon User::
 polkitd:565:565:/var/empty:/usr/sbin/nologin:Polkit Daemon User::
 sddm:219:219:/var/lib/sddm:/usr/sbin/nologin:SDDM Display Manager user:video:
-supser:1001:1001:/home/supser:/bin/sh:SunshineBSD default user:wheel,video:password"
+supser:1001:1001:/home/supser:/bin/sh:SunshineBSD default user:wheel,video,operator:password"
 
 ensure_group() { # name gid
     name="$1"; gid="$2"

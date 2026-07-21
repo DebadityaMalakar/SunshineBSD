@@ -22,7 +22,9 @@ t.case("launches sddm directly when it is not supervised", function()
     t.match(plan.argv[3], "runsvdir")
     t.match(plan.argv[3], start.SERVICE_DIR)
     t.match(plan.argv[3], "&")
-    t.match(plan.argv[3], "exec " .. start.ENV_BIN .. " " .. start.QT_QUICK_ENV .. " " .. start.SDDM)
+    -- plain find, not t.match: SDDM_LAUNCH contains "-", a Lua pattern
+    -- quantifier.
+    t.ok(plan.argv[3]:find("exec " .. start.SDDM_LAUNCH, 1, true), "execs the sddm launcher")
     t.match(plan.description, "unsupervised")
     t.match(plan.description, "runsvdir")
 end)
@@ -60,8 +62,43 @@ t.case("supervised path needs no pkgfiles step (rc(8) already ran it)", function
     end
 end)
 
-t.case("forces the Qt Quick software rasterizer (no GPU acceleration yet)", function()
-    t.eq(start.QT_QUICK_ENV, "QT_QUICK_BACKEND=software")
+t.case("launches sddm through the GPU-aware launcher, not the bare binary", function()
+    -- sunshine-sddm picks the Qt Quick backend per boot (hardware GL
+    -- with a KMS device, software rasterizer fallback without one), so
+    -- flash must never hardcode either backend itself.
+    t.eq(start.SDDM_LAUNCH, "/usr/local/sbin/sunshine-sddm")
+end)
+
+t.case("mounts procfs before any session starts", function()
+    -- Nothing in FreeBSD's base mounts /proc; desktop software assumes it
+    -- (same step sysutils/desktop-installer performs for every desktop).
+    for _, plan in ipairs({ start.plan(false), start.plan_xfce() }) do
+        local procfs_pos = plan.argv[3]:find(start.PROCFS, 1, true)
+        local runsvdir_pos = plan.argv[3]:find(start.RUNSVDIR, 1, true)
+        t.ok(procfs_pos, "provision-procfs call present")
+        t.ok(procfs_pos < runsvdir_pos, "procfs before runsvdir")
+    end
+end)
+
+t.case("provisions the GPU (driver + kmod decision) before any session", function()
+    -- provision-gpu rewrites the Xorg driver snippet to match the
+    -- hardware (modesetting vs scfb), so it must run after the pkgfiles
+    -- step and before runsvdir/X can start.
+    for _, plan in ipairs({ start.plan(false), start.plan_xfce() }) do
+        local gpu_pos = plan.argv[3]:find(start.GPU, 1, true)
+        local pkgfiles_pos = plan.argv[3]:find(start.PKGFILES, 1, true)
+        local runsvdir_pos = plan.argv[3]:find(start.RUNSVDIR, 1, true)
+        t.ok(gpu_pos, "provision-gpu call present")
+        t.ok(pkgfiles_pos < gpu_pos, "pkgfiles before gpu")
+        t.ok(gpu_pos < runsvdir_pos, "gpu before runsvdir")
+    end
+end)
+
+t.case("supervised path needs no gpu step (rc(8) already ran it)", function()
+    local plan = start.plan(true)
+    for i = 1, #plan.argv do
+        t.not_ok(plan.argv[i]:find(start.GPU, 1, true), "no provision-gpu in sv up path")
+    end
 end)
 
 t.case("checks the real supervise/ok FIFO path, not just the service dir", function()

@@ -1,0 +1,92 @@
+#!/bin/sh
+# provision-procfs -- ensure procfs(5) is mounted on /proc.
+#
+# One job: make /proc exist, be mounted, and stay mounted across reboots
+# of a real install.
+#
+# Copied from how FreeBSD's own sysutils/desktop-installer sets up a
+# desktop (its procfs_config(), read directly from the packaged script on
+# 2026-07-21): append the fstab entry, mkdir /proc, and mount it if it is
+# not mounted yet. desktop-installer does this unconditionally for every
+# desktop it can install, not just one -- procfs is absent from a stock
+# FreeBSD install (nothing in base mounts it) but assumed present by a
+# lot of desktop software, which is exactly the class of gap this
+# project keeps hitting.
+#
+# Three separate steps because they fix different lifetimes:
+#   - mkdir: /proc may not exist in the tree at all.
+#   - mount: this boot (the live ISO never gets a second boot).
+#   - fstab: every later boot of a real install. On the live ISO /etc is
+#     a memory overlay, so the fstab edit is discarded at shutdown --
+#     harmless, and the mount step already covered this boot.
+#
+# Idempotent by construction: every step checks before acting, so this is
+# safe to run once per boot from etc/rc.d/sunshine_provision.
+#
+# usage: provision-procfs
+#
+# Environment (overridable for tests):
+#   PROC_DIR  mountpoint (default: /proc)
+#   FSTAB     fstab to keep in sync (default: /etc/fstab)
+#   MOUNT     mount(8) binary (default: /sbin/mount)
+#   DF        df(1) binary, used for the "already mounted" probe
+#             (default: /bin/df)
+
+set -eu
+
+if [ "$#" -ne 0 ]; then
+    echo "usage: provision-procfs" >&2
+    exit 2
+fi
+
+PROC_DIR="${PROC_DIR:-/proc}"
+FSTAB="${FSTAB:-/etc/fstab}"
+MOUNT="${MOUNT:-/sbin/mount}"
+DF="${DF:-/bin/df}"
+
+fstab_line="proc		$PROC_DIR		procfs	rw		0	0"
+
+# --- 1. the mountpoint ----------------------------------------------------
+
+if [ ! -d "$PROC_DIR" ]; then
+    echo "provision-procfs: creating $PROC_DIR"
+    mkdir -p "$PROC_DIR" || {
+        echo "provision-procfs: cannot create $PROC_DIR" >&2
+        exit 1
+    }
+fi
+
+# --- 2. the fstab entry ---------------------------------------------------
+# Matched on the mountpoint field rather than the whole line so a
+# hand-edited entry (different spacing, different options) is left alone
+# instead of being duplicated.
+
+if [ -f "$FSTAB" ] && grep -q "^[^#]*[[:space:]]$PROC_DIR[[:space:]][[:space:]]*procfs" "$FSTAB"; then
+    echo "provision-procfs: $FSTAB already has a $PROC_DIR entry"
+elif [ -w "$FSTAB" ]; then
+    echo "provision-procfs: adding the $PROC_DIR entry to $FSTAB"
+    printf '%s\n' "$fstab_line" >> "$FSTAB" || {
+        echo "provision-procfs: cannot append to $FSTAB" >&2
+        exit 1
+    }
+else
+    # Read-only /etc with no overlay: this boot's mount below still works,
+    # so this is a note, not a failure.
+    echo "provision-procfs: $FSTAB is not writable, skipping the fstab entry"
+fi
+
+# --- 3. mount it for this boot -------------------------------------------
+
+if "$DF" 2>/dev/null | grep -q "[[:space:]]$PROC_DIR\$"; then
+    echo "provision-procfs: $PROC_DIR is already mounted"
+    echo "provision-procfs: done"
+    exit 0
+fi
+
+echo "provision-procfs: mounting procfs on $PROC_DIR"
+"$MOUNT" -t procfs proc "$PROC_DIR" || {
+    echo "provision-procfs: failed to mount procfs on $PROC_DIR" >&2
+    exit 1
+}
+
+echo "provision-procfs: done"

@@ -98,6 +98,50 @@ else
 fi
 check "make-iso.sh runs the stages in dependency order" "$order_ok"
 
+# --- the generated rc(8) boot chain --------------------------------------
+# stage-boot-chain.sh needs only SUNISO_STAGE, so its real output can be
+# generated into a scratch tree and asserted on directly, rather than
+# grepping the generator's source.
+
+CHAIN_STAGE="tests/tmp/iso-parts/stage"
+rm -rf "$CHAIN_STAGE"
+mkdir -p "$CHAIN_STAGE"
+SUNISO_STAGE="$CHAIN_STAGE" sh "$PARTS_DIR/stage-boot-chain.sh" >/dev/null 2>&1
+check "stage-boot-chain.sh runs with only SUNISO_STAGE set" $?
+
+PROV="$CHAIN_STAGE/etc/rc.d/sunshine_provision"
+[ -f "$PROV" ]
+check "generates etc/rc.d/sunshine_provision" $?
+
+# Regression guard, 2026-07-21: provision-pkgfiles builds its caches by
+# running the packages' own tools out of /usr/local/bin, every one of them
+# dynamically linked against /usr/local/lib. etc/rc.d/ldconfig is what puts
+# that directory in the runtime linker's hints. Without this REQUIRE,
+# rcorder scheduled provisioning first and every tool died at exec time
+# ("ld-elf.so.1: Shared object libglib-2.0.so.0 not found"), so no caches
+# were ever built on a real boot and the Xfce session aborted seconds
+# after login. Confirmed live on a booted ISO before the fix.
+grep -q '^# REQUIRE:.*ldconfig' "$PROV"
+check "sunshine_provision REQUIREs ldconfig (cache tools need /usr/local/lib)" $?
+grep -q '^# REQUIRE:.*sunshine_etc_overlay' "$PROV"
+check "sunshine_provision still REQUIREs sunshine_etc_overlay" $?
+grep -q '^# BEFORE:.*dbus' "$PROV"
+check "sunshine_provision still runs before dbus" $?
+
+for step in procfs accounts pkgfiles gpu; do
+    grep -q "sunshine-provision-$step" "$PROV"
+    check "sunshine_provision runs provision-$step" $?
+done
+
+# Accounts must precede pkgfiles: pkgfiles chowns files to the messagebus
+# group that provision-accounts creates.
+pos_acct=$(grep -n "sunshine-provision-accounts" "$PROV" | head -n 1 | cut -d: -f1)
+pos_pkgf=$(grep -n "sunshine-provision-pkgfiles" "$PROV" | head -n 1 | cut -d: -f1)
+[ -n "$pos_acct" ] && [ -n "$pos_pkgf" ] && [ "$pos_acct" -lt "$pos_pkgf" ]
+check "provision-accounts runs before provision-pkgfiles" $?
+
+rm -rf "tests/tmp/iso-parts"
+
 echo "== iso parts: $passed passed, $failed failed =="
 [ "$failed" -eq 0 ] || exit 1
 exit 0

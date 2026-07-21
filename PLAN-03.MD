@@ -74,16 +74,16 @@ categories over releases.
 | Thunar | `thunar` (origin `x11-fm/thunar` family) | File manager; not a dependency of the `xfce` meta-port on FreeBSD, fetched explicitly |
 | SDDM | `sddm` (origin `x11/sddm`, 0.21.0.36_3) | Display/login manager. Binary `/usr/local/bin/sddm`; ships `/usr/local/share/xsessions/xfce.desktop` (via `xfce4-session`) for the greeter to discover automatically |
 | Xorg | `xorg-server` (origin `x11-servers/xorg-server`) | X server backing both the SDDM greeter and the Xfce session; not a separate runit service — SDDM spawns it itself |
-| Xorg video driver | `xf86-video-scfb` (origin `x11-drivers/xf86-video-scfb`) + a forced `xorg.conf.d` snippet | Confirmed 2026-07-18, the hard way (live-tested boot: SDDM's own log showed X dying instantly, "Failed to read display number from pipe"): `xorg-server`'s dependency list (17 packages) pulls in `libdrm` but zero `xf86-video-*` driver packages — X.Org video drivers are always separate, never a server dependency. With `drm-kmod` deliberately deferred (see Open Questions), Xorg had no driver to load at all. `xf86-video-scfb` is FreeBSD's own hardware-independent syscons framebuffer driver, the standard unaccelerated fallback for generic hardware/VMs — exactly what this row's own "falls back to scfb/vesa" text already assumed. **Fetching the package alone was not enough**: re-tested after adding it, identical failure. Root cause: `scfb` is deliberately not PCI-ID-matched (it's the no-GPU-match fallback), so Xorg's PCI autoprobe never selects it on its own — confirmed by the failure being byte-for-byte identical before and after the package was added. `tools/make-iso.sh` now also writes `usr/local/etc/X11/xorg.conf.d/10-scfb.conf` forcing `Driver "scfb"` explicitly; this is the standard, platform-universal way to force an X.Org driver, not a FreeBSD-specific workaround |
+| Xorg video driver | `xf86-video-scfb` (origin `x11-drivers/xf86-video-scfb`) + a forced `xorg.conf.d` snippet | Confirmed 2026-07-18, the hard way (live-tested boot: SDDM's own log showed X dying instantly, "Failed to read display number from pipe"): `xorg-server`'s dependency list (17 packages) pulls in `libdrm` but zero `xf86-video-*` driver packages — X.Org video drivers are always separate, never a server dependency. With `drm-kmod` deliberately deferred (see Open Questions), Xorg had no driver to load at all. `xf86-video-scfb` is FreeBSD's own hardware-independent syscons framebuffer driver, the standard unaccelerated fallback for generic hardware/VMs — exactly what this row's own "falls back to scfb/vesa" text already assumed. **Fetching the package alone was not enough**: re-tested after adding it, identical failure. Root cause: `scfb` is deliberately not PCI-ID-matched (it's the no-GPU-match fallback), so Xorg's PCI autoprobe never selects it on its own — confirmed by the failure being byte-for-byte identical before and after the package was added. `tools/make-iso.sh` now also writes `usr/local/etc/X11/xorg.conf.d/10-scfb.conf` forcing `Driver "scfb"` explicitly; this is the standard, platform-universal way to force an X.Org driver, not a FreeBSD-specific workaround. **Update 2026-07-21:** the baked snippet is renamed `10-video.conf` and is only the build-time default — `sunshine-provision-gpu` (src/sysaccounts/provision-gpu) rewrites it at every boot to `Driver "modesetting"` (xorg-server's built-in KMS DDX, glamor-accelerated) when a KMS GPU actually attached, keeping `scfb` as the fallback content otherwise |
 | Xorg input driver | `xf86-input-libinput` (origin `x11-drivers/xf86-input-libinput`) | Confirmed 2026-07-18, the same class of gap as the video driver row above and found the same hard way: after fixing the framebuffer/UEFI/accounts issues, SDDM's greeter rendered correctly but the pointer never moved and no input registered at all — live-diagnosed via `top` (`sddm-greeter-qt6` at 0.00% CPU in `select`, Xorg also just sleeping): not a hang, both processes genuinely had nothing to receive. `xorg-server`'s dependency closure pulls zero `xf86-input-*` packages, same as it pulls zero video drivers. Unlike `xf86-video-scfb`, this needs no `xorg.conf.d` forcing — libinput isn't PCI-ID-matched either, but Xorg's input autoconfiguration picks up any available input driver for the keyboard/mouse device classes without help |
 | Console framebuffer | `vesa_load="YES"` in `/boot/loader.conf` (base kernel module, no package) **+ UEFI boot required** | Confirmed 2026-07-18, the hard way, across two rounds: (1) adding `xf86-video-scfb` + forcing `Driver "scfb"` (row above) still hit "No devices detected" / "no screens found" on every live-tested boot; `kldload vesa` live, post-boot, provably had **zero effect** (identical manual `X` test before/after) since `vt(4)` picks its backend once at early boot attach, before userland runs — fixed by moving `vesa_load="YES"` into `loader.conf` so it loads before `vt(4)` probes. (2) Still failed identically even with that fix and `vesa.ko` confirmed loaded at boot (`kldstat`) — root cause was boot firmware mode, not the module: `xf86-video-scfb` only works when `vt(4)` has a real UEFI GOP framebuffer, which legacy BIOS boot never provides (confirmed against multiple independent FreeBSD forum reports, not just this project's own testing). The QEMU test command was booting legacy BIOS (`-boot d`, no firmware flags) the whole time; adding OVMF UEFI firmware (`-drive if=pflash,...edk2-x86_64-code.fd` + a writable vars pflash) fixed it immediately. `vesa_load="YES"` is left in `loader.conf` since it's harmless, but UEFI boot is the fix that actually mattered. Confirmed working end-to-end: X starts cleanly under UEFI, no more "no screens found" |
-| SDDM greeter rendering | `QT_QUICK_BACKEND=software` env var, set on every path that launches `sddm` (`src/sunconfig/lib/registry.lua`'s command string via `/usr/bin/env`, and `src/flash/lib/start.lua`'s unsupervised launch argv) | Confirmed 2026-07-18: once Xorg itself started cleanly (row above), SDDM still produced only a black screen — X alive, VT/keyboard held, nothing painted, indistinguishable from a hang (confirmed: no amount of input reached the console until the QEMU instance was hard-reset). Root cause: SDDM's greeter is a Qt Quick (QML) application whose default scene graph wants a working OpenGL context, and this project has zero GPU acceleration on purpose right now (`xf86-video-scfb` is a plain unaccelerated framebuffer driver; `drm-kmod` is still deferred, see Open Questions below). `QT_QUICK_BACKEND=software` forces Qt Quick's software rasterizer instead. Not yet re-confirmed working end-to-end (requires a rebuild + reboot to test, same as the row above) |
+| SDDM greeter rendering | `sunshine-sddm` (src/sysaccounts/sddm-launch), the launcher every sddm path uses (`src/sunconfig/lib/registry.lua`'s service command and `src/flash/lib/start.lua`'s unsupervised launch): hardware GL when `/dev/dri/card*` exists, `QT_QUICK_BACKEND=software` fallback otherwise (2026-07-21; was an unconditional `QT_QUICK_BACKEND=software` before the DRM kmod landed) | Confirmed 2026-07-18: once Xorg itself started cleanly (row above), SDDM still produced only a black screen — X alive, VT/keyboard held, nothing painted, indistinguishable from a hang (confirmed: no amount of input reached the console until the QEMU instance was hard-reset). Root cause: SDDM's greeter is a Qt Quick (QML) application whose default scene graph wants a working OpenGL context, and this project has zero GPU acceleration on purpose right now (`xf86-video-scfb` is a plain unaccelerated framebuffer driver; `drm-kmod` is still deferred, see Open Questions below). `QT_QUICK_BACKEND=software` forces Qt Quick's software rasterizer instead. Not yet re-confirmed working end-to-end (requires a rebuild + reboot to test, same as the row above) |
 | No-DM fallback | `xinit` (origin `x11/xinit`) + `startxfce4` (shipped by `xfce4-session`, already in the `xfce` meta-port) | Added 2026-07-18 in response to how painful the SDDM/Qt/GL debugging above was: `flash start xfce` bypasses SDDM entirely and execs `/usr/local/bin/startxfce4` directly — upstream's own tested no-display-manager launcher (runs `xinit` itself, picks a free VT, sources the right xfce `xinitrc`), not a hand-rolled `xinit`/`startx` invocation. Confirmed real 2026-07-18: `xinit` is **not** a transitive dependency of `xfce4-session` or the `xfce` meta-port (checked the live pkg repo, same class of gap as the `xf86-video-scfb` row above), so `tools/make-iso.sh` fetches it explicitly. Xfce/xfwm4 has no hard OpenGL requirement the way SDDM's QML greeter does (compositing is optional and degrades gracefully), so this path should work even before `drm-kmod` lands |
 | D-Bus | `dbus` (origin `devel/dbus`) | System message bus; SDDM, polkit, and most of Xfce's session services depend on it being up first |
 | polkit | `polkit` (origin `sysutils/polkit`) | Privilege escalation from inside an unprivileged Xfce session (mounting, power management, ...) |
 | Seat backend | `consolekit2` (origin `sysutils/consolekit2`) | FreeBSD has no `systemd-logind`; polkit and Xfce expect *something* answering seat/session queries. `elogind` was tried first but does not exist as a FreeBSD package on any current branch — see "Seat backend: consolekit2" below |
 | Service supervisor | `runit` (origin `sysutils/runit`, ships `/usr/local/etc/rc.d/runsvdir`) | Actually runs the `/service` tree `sunconfig` generates — see "runit bootstrap" below. Needs no dedicated system account |
-| GPU accel | graphics/drm-kmod | Kernel modesetting for Intel/AMD; without it, Xorg now correctly falls back to `xf86-video-scfb` (see the Xorg video driver row above). `drm-kmod` itself is **still not fetched** — see Open Questions |
+| GPU accel | `drm-61-kmod` + the 14 `gpu-firmware-intel-kmod-*` packages (Intel only for now, user decision 2026-07-21) | Ships `i915kms.ko` + firmware; `sunshine-provision-gpu` detects an Intel display device via pciconf at boot, kldloads it, and flips Xorg to `modesetting` only when `/dev/dri/card*` actually appears — every failure degrades to the scfb/software path (see the rows above). Deliberately NOT the `drm-kmod` metaport, whose `gpu-firmware-kmod` dependency drags in ~180 AMD/Radeon firmware packages. GL userland was already present: `xorg-server`'s dependency closure pulls `mesa-dri`/`mesa-libs` (confirmed live 2026-07-21). The repo kmod is built against `__FreeBSD_version` 1404000 (14.4), so the ISO base was bumped 14.3 → 14.4-RELEASE the same day to match (verified live that the 14.4 disc1 ISO + checksum exist upstream); if the pairing ever skews again, the boot just continues on software rendering |
 | Font | N/A — fetched directly from Google Fonts, not a FreeBSD port | Matches `PLAN.md`'s `Font: Open Sans` foundation decision. `tools/fetch-fonts.sh` pulls Open Sans (variable font, official google/fonts mirror) and Noto Color Emoji (emoji fallback, resolved live via the Fonts CSS2 API since its URL is versioned) into every ISO |
 
 ## Dependency / boot order
@@ -147,6 +147,50 @@ FreeBSD-native fix is simply putting the `sddm` user in the `video`
 group, rather than relying on logind-style device handoff.
 
 ## Decisions
+
+- **`sunshine_provision` must be ordered after `ldconfig`.** Confirmed
+  live 2026-07-21 by capturing a full boot on the serial console:
+  `provision-pkgfiles` builds its caches by running the packages' own
+  tools out of `/usr/local/bin`, and every one of them is dynamically
+  linked against `/usr/local/lib`. `etc/rc.d/ldconfig` is what adds
+  that directory to the runtime linker's hints, and without it in the
+  `REQUIRE:` line `rcorder` put provisioning at position 43 against
+  `ldconfig`'s 45 — so every tool died at exec time (`ld-elf.so.1:
+  Shared object "libglib-2.0.so.0" not found, required by
+  "gdk-pixbuf-query-loaders"`), no caches were built, and the Xfce
+  session aborted seconds after login with the same fatal libwnck
+  assertion and SIGTRAP'd at-spi bus that `provision-pkgfiles` was
+  written to prevent. Adding `ldconfig` moved it to 58 (after
+  `ldconfig`), after which a login reached a stable, fully rendered
+  Xfce desktop. **The general lesson is broader than this one script:
+  anything in the rc(8) chain that executes a *port* binary has to
+  REQUIRE `ldconfig`, the same way anything REQUIREing a port
+  *service* has to live in `/usr/local/etc/rc.d` (see the rcorder
+  two-pass note below).** It also hid for two days because the
+  2026-07-19 verification ran the provisioning by hand from the
+  installer's shell escape, where rc(8) — and so `ldconfig` — had
+  already run; the real boot path was never exercised. `tests/
+  test_iso_parts.sh` now generates the boot chain and asserts the
+  ordering.
+
+- **Desktop prerequisites copied from `sysutils/desktop-installer`.**
+  2026-07-21, after reading the packaged script directly rather than
+  guessing at what a FreeBSD desktop needs. Two things it does that
+  this project did not: (1) `procfs_config()` — mount `procfs(5)` on
+  `/proc` and add the `fstab` entry, done unconditionally for every
+  desktop it supports, since nothing in FreeBSD's base mounts `/proc`
+  but desktop software widely assumes it (now
+  `src/sysaccounts/provision-procfs`); (2) `enable_user_shutdown()` —
+  install a polkit rule authorizing `org.freedesktop.consolekit.
+  system.restart`/`.stop` for the `operator` group, which is exactly
+  what `x11-wm/xfce4-session`'s own pkg-message tells you to add by
+  hand, and without which the log-out dialog's Shut Down / Restart
+  buttons are inert. The build now ships that rule, `provision-
+  accounts` puts `supser` in `operator`, and `provision-pkgfiles`
+  restores `rules.d` to `polkitd:wheel 0700` (verified against
+  polkit's real `+MANIFEST`) — polkit will not load rules from a
+  directory it does not consider trustworthy, and plain extraction
+  cannot preserve that mode.
 
 - **Seat backend: consolekit2.** elogind was tried first —
   re-implementing systemd-logind's `org.freedesktop.login1` D-Bus API
@@ -504,9 +548,14 @@ group, rather than relying on logind-style device handoff.
   (or none, since SDDM itself owns that vty) rather than being left to
   `init(8)`. Full "every vty is a runit service" isn't built yet;
   tracked here so it isn't lost, not resolved by this document.
-- **GPU acceleration default.** Whether `drm-kmod` ships enabled by
+- **GPU acceleration default.** ~~Whether `drm-kmod` ships enabled by
   default vs. opt-in/autodetected is deferred to Stage 1's hardware
-  detection work — not decided in this document.
+  detection work — not decided in this document.~~ Decided 2026-07-21:
+  autodetected at boot, Intel only for now. `sunshine-provision-gpu`
+  probes pciconf, kldloads `i915kms`, and picks `modesetting` vs `scfb`
+  per boot; `sunshine-sddm` picks the greeter's Qt Quick backend the
+  same way. Software rendering remains the automatic fallback whenever
+  the hardware path fails for any reason. AMD/NVIDIA remain open.
 - **Eventual `sunconfig` integration.** Once Stage 8 is further along,
   `desktop = { environment = "xfce", ... }` in `examples/etc-sunshine/
   desktop.lua` should be what generates this runit service tree,

@@ -40,7 +40,9 @@ build_localbase() {
         "$BASE/local/share/glib-2.0/schemas" \
         "$BASE/local/share/mime/packages" \
         "$BASE/local/share/icons/hicolor" \
-        "$BASE/local/share/icons/notatheme"
+        "$BASE/local/share/icons/notatheme" \
+        "$BASE/local/etc/polkit-1/rules.d" \
+        "$BASE/local/share/polkit-1/rules.d"
     : > "$BASE/local/libexec/dbus-daemon-launch-helper"
     : > "$BASE/local/bin/pkexec"
     : > "$BASE/local/lib/polkit-1/polkit-agent-helper-1"
@@ -121,6 +123,17 @@ grep -q "chmod 4755 $BASE/local/bin/pkexec" "$BASE/tool-calls.txt"
 check "restores pkexec setuid mode 4755" $?
 grep -q "chmod 4755 $BASE/local/lib/polkit-1/polkit-agent-helper-1" "$BASE/tool-calls.txt"
 check "restores polkit-agent-helper-1 setuid mode 4755" $?
+
+# polkit refuses to load rules from a rules.d it does not trust, and plain
+# extraction leaves the directory root-owned instead of polkitd:wheel 0700
+# (verified against polkit's real +MANIFEST, 2026-07-21). Matters now that
+# the build ships a shutdown/restart rules file there.
+grep -q "chown polkitd:wheel $BASE/local/etc/polkit-1/rules.d" "$BASE/tool-calls.txt"
+check "restores etc polkit rules.d ownership (polkitd:wheel)" $?
+grep -q "chmod 0700 $BASE/local/etc/polkit-1/rules.d" "$BASE/tool-calls.txt"
+check "restores etc polkit rules.d mode 0700" $?
+grep -q "chown polkitd:wheel $BASE/local/share/polkit-1/rules.d" "$BASE/tool-calls.txt"
+check "restores share polkit rules.d ownership (polkitd:wheel)" $?
 
 grep -q "glib-compile-schemas $BASE/local/share/glib-2.0/schemas" "$BASE/tool-calls.txt"
 check "compiles the GSettings schemas" $?

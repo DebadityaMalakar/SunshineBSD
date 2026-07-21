@@ -152,7 +152,7 @@ t.case("start ui launches sddm directly when the service dir exists but isn't su
     t.eq(calls[1][1], "/bin/sh")
     t.eq(calls[1][2], "-c")
     t.match(calls[1][3], "runsvdir")
-    t.match(calls[1][3], "exec /usr/bin/env QT_QUICK_BACKEND=software /usr/local/bin/sddm")
+    t.match(calls[1][3], "exec /usr/local/sbin/sunshine%-sddm")
 end)
 
 t.case("start ui launches sddm directly when nothing is present at all", function()
@@ -164,7 +164,7 @@ t.case("start ui launches sddm directly when nothing is present at all", functio
     t.eq(calls[1][1], "/bin/sh")
     t.eq(calls[1][2], "-c")
     t.match(calls[1][3], "runsvdir")
-    t.match(calls[1][3], "exec /usr/bin/env QT_QUICK_BACKEND=software /usr/local/bin/sddm")
+    t.match(calls[1][3], "exec /usr/local/sbin/sunshine%-sddm")
 end)
 
 t.case("start xfce bypasses sddm and launches startxfce4 directly", function()

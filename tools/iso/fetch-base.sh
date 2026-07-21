@@ -23,15 +23,45 @@ base_url="$SUNISO_MIRROR/releases/$SUNISO_ARCH/$SUNISO_ARCH/ISO-IMAGES/$SUNISO_N
 
 # --- download + verify --------------------------------------------------
 
+# --connect-timeout/--retry rather than curl's default of waiting
+# forever: confirmed the hard way 2026-07-21, when a wedged host network
+# left `make iso-dev` sitting on a stalled connection with a 0-byte
+# progress meter and no diagnostic at all. A build that cannot reach the
+# mirror should say so in seconds, not look like a slow download.
+curl_get() { # url dest
+    curl -fL --proto '=https' \
+        --connect-timeout 15 --retry 2 --retry-delay 3 --retry-max-time 90 \
+        -o "$2" "$1"
+}
+
 mkdir -p "$SUNISO_CACHE"
 if [ ! -f "$SUNISO_CACHE/$iso_name" ]; then
     log "downloading $base_url/$iso_name"
     # $$ suffix so two concurrent runs cannot clobber each other's download
-    curl -fL --proto '=https' -o "$SUNISO_CACHE/$iso_name.part.$$" "$base_url/$iso_name"
+    curl_get "$base_url/$iso_name" "$SUNISO_CACHE/$iso_name.part.$$" || {
+        rm -f "$SUNISO_CACHE/$iso_name.part.$$"
+        fail "could not download $iso_name from $base_url"
+    }
     mv "$SUNISO_CACHE/$iso_name.part.$$" "$SUNISO_CACHE/$iso_name"
 fi
-log "fetching checksums"
-curl -fL --proto '=https' -o "$SUNISO_CACHE/$sum_name" "$base_url/$sum_name"
+
+# Only fetch the checksum file when it is not already cached. It is named
+# for the exact release, so a cached copy always describes the cached ISO
+# -- and re-fetching it on every build made an otherwise fully-cached
+# build (nothing else here touches the network) fail on a host with no
+# route to the mirror, which is exactly what happened 2026-07-21. The ISO
+# is still verified against it below on every single build, so cache
+# corruption is still caught; what is skipped is only the re-download.
+if [ ! -s "$SUNISO_CACHE/$sum_name" ]; then
+    log "fetching checksums"
+    curl_get "$base_url/$sum_name" "$SUNISO_CACHE/$sum_name.part.$$" || {
+        rm -f "$SUNISO_CACHE/$sum_name.part.$$"
+        fail "could not download $sum_name from $base_url"
+    }
+    mv "$SUNISO_CACHE/$sum_name.part.$$" "$SUNISO_CACHE/$sum_name"
+else
+    log "using cached checksums ($sum_name)"
+fi
 
 # Checksum line format: SHA256 (FreeBSD-...iso) = <hash>
 want=$(grep -F "($iso_name)" "$SUNISO_CACHE/$sum_name" | sed -n 's/.*= *//p' | head -n 1)

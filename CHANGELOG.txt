@@ -1,0 +1,195 @@
+SunshineBSD Changelog
+=====================
+
+0.3.1-BETA (2026-07-21)
+-----------------------
+
+The first beta with a working desktop: logging in through SDDM
+reaches a stable, rendered Xfce session on the live ISO -- now with
+Intel hardware rendering, on a FreeBSD 14.4 base.
+
+Fixed:
+
+* The Xfce session died seconds after login on every real boot. Root
+  cause, found by capturing a full boot on the serial console of a
+  live ISO: the provisioning step that builds the package caches ran
+  BEFORE the boot step that adds /usr/local/lib to the runtime
+  linker's search path. It builds those caches by running the
+  packages' own tools, all of which link against /usr/local/lib, so
+  every one of them died at startup ("Shared object
+  libglib-2.0.so.0 not found") and no cache was ever built. Missing
+  GSettings schemas and gdk-pixbuf loaders then killed the session
+  exactly as they did before the cache step existed. The provisioning
+  step now runs after ldconfig; verified on the running system, where
+  it moved from position 43 to 58 in the boot order, and a login then
+  reached a stable, fully rendered Xfce desktop.
+
+  The cache fix below looked complete because it was only ever
+  verified from the installer's shell escape, which runs after the
+  boot has finished and ldconfig has already run. The real boot path
+  was never exercised. A test now asserts the ordering directly.
+
+* Xfce sessions collapsed within ~30 seconds of login. Five root
+  causes, all found by driving the live ISO headless in QEMU and
+  verified on the running system before being fixed:
+
+  - The package extraction step never generated pkg's post-install
+    caches. Missing GSettings schemas are a fatal GLib abort that
+    repeatedly killed the accessibility bus and panel; missing
+    gdk-pixbuf loaders cascaded into a fatal libwnck assertion that
+    killed the whole session. A new provision-pkgfiles step now
+    reconciles all of it at boot: compiled GSettings schemas, the
+    gdk-pixbuf loader cache, the shared-mime-info database, icon
+    caches, and the fontconfig cache.
+
+  - Setuid modes recorded in package manifests were lost on
+    extraction, leaving D-Bus system activation and polkit broken.
+    provision-pkgfiles restores them (dbus-daemon-launch-helper
+    4750 root:messagebus, pkexec and polkit-agent-helper-1 4755).
+
+  - polkit and consolekit2 started before dbus and died, never to be
+    retried: their rc.d scripts lived in /etc/rc.d, where the boot
+    sequencer's first ordering pass cannot see a dependency on a
+    port service (rcorder silently dropped the constraint and sorted
+    polkit to position 1 of the entire boot). Both now live in
+    /usr/local/etc/rc.d, ordered correctly in the second pass.
+
+  - /var/log/sunshine never existed at runtime (/var is a fresh
+    memory filesystem on every live boot), so every runit log
+    service crash-looped -- and a service writing to an unread
+    stdout pipe blocked forever once the pipe filled. Every
+    generated log script now creates its own log directory first.
+
+  - A leftover pre-SDDM "desktop" service (lightdm, which is not
+    installed) crash-looped on every boot. Removed; the display
+    manager is sddm, an ordinary supervised service.
+
+* fetch-pkg.sh could silently skip the final batch of package
+  downloads (background jobs orphaned in a pipeline subshell).
+
+Added:
+
+* procfs is mounted on /proc and added to fstab, copying what
+  FreeBSD's own sysutils/desktop-installer does for every desktop it
+  installs. Nothing in FreeBSD's base mounts /proc, but desktop
+  software widely assumes it.
+
+* Shut Down and Restart now work from the Xfce log-out dialog. The
+  ISO ships the polkit rule that x11-wm/xfce4-session's own
+  pkg-message asks for (the same one desktop-installer installs), the
+  default user joins the operator group it authorizes, and the boot
+  restores polkit's rules.d to polkitd:wheel 0700 -- another
+  permission the package extraction cannot preserve, and one polkit
+  requires before it will load rules at all.
+
+* Hardware GPU rendering, Intel first, with software rendering as the
+  automatic fallback. The ISO now ships drm-61-kmod (i915kms) plus all
+  14 Intel GPU firmware packages (~5 MB; deliberately not the drm-kmod
+  metaport, which drags in ~180 AMD firmware packages). A new boot
+  step, sunshine-provision-gpu, detects an Intel display controller
+  via pciconf, loads i915kms, and rewrites the Xorg driver snippet
+  (now 10-video.conf) to the accelerated "modesetting" driver when a
+  KMS device actually appears -- and back to "scfb" when it doesn't,
+  so a disk moved between machines self-heals in both directions.
+
+* SDDM now launches through sunshine-sddm, which picks the greeter's
+  Qt Quick backend per boot: hardware OpenGL when /dev/dri exists,
+  QT_QUICK_BACKEND=software otherwise (previously software was forced
+  unconditionally). Xfce needs no equivalent switch -- its compositor
+  and GTK apps pick up the accelerated GL path through Mesa on their
+  own once the KMS driver is attached.
+
+* Base bumped to FreeBSD 14.4-RELEASE (from 14.3): the FreeBSD:14 pkg
+  repo builds its kernel modules -- i915kms in particular -- against
+  14.4, so the remastered kernel must match for the DRM driver to
+  load. The first build after this change downloads the new upstream
+  ISO (~1 GB).
+
+* Every hardware step still degrades gracefully: missing kmod, a
+  kldload the kernel refuses, or a device that never attaches all land
+  back on the known-good scfb + software-rendering path instead of
+  breaking boot.
+
+* flash start ui / flash start xfce -- launch the desktop session,
+  bootstrapping runsvdir, the /service overlay, and package-file
+  provisioning as needed. "xfce" bypasses SDDM (startxfce4 directly)
+  as a fallback.
+* flash enable <service> -- clear a runit down file and bring the
+  service up.
+* upower added to the ISO package set (battery/power info for the
+  desktop).
+* Boot-chain rc.d scripts for the live ISO: sunshine_etc_overlay
+  (writable overlays over /etc, /home, /root, /service on read-only
+  media) and sunshine_provision (system accounts + package file
+  state), both ahead of dbus and runsvdir.
+
+Changed:
+
+* Service architecture settled: dbus, polkit, and consolekit2 run
+  directly under rc(8) as foundational always-on prerequisites;
+  everything else (sddm, cron, syslogd, ...) runs under runit.
+* make-iso.sh rewritten as a thin orchestrator over single-job
+  components in tools/iso/ (fetch-base, brand-tree, stage-tooling,
+  stage-packages, stage-boot-chain, pack-dist, build-iso), each
+  refusing to run outside the orchestrator's environment, with its
+  own hermetic test suite.
+
+Build:
+
+* Builds no longer touch the network for inputs that are already
+  cached. The base checksum file was re-downloaded on every build and
+  the emoji font's URL was re-resolved against the Google Fonts API
+  even when the font was cached, so a fully-cached build still failed
+  on a host that could not reach either one. The ISO is still verified
+  against its checksum on every build; only the re-download is
+  skipped.
+
+* Every download now has a connect timeout and bounded retries. An
+  unreachable mirror previously left the build sitting on a stalled
+  connection indefinitely, showing a zero-byte progress meter and no
+  diagnostic; it now fails in seconds and says which URL it could not
+  reach.
+
+0.3.0 (2026-07-18)
+------------------
+
+* Full desktop-session package set baked into the ISO by default:
+  Xorg (scfb framebuffer driver), SDDM, Xfce, Thunar, dbus, polkit,
+  consolekit2, runit.
+* Open Sans and Noto Color Emoji system fonts, fetched from Google
+  Fonts at build time.
+* flash: lists SunshineBSD tooling and installed packages.
+* sunshine.txz + MANIFEST so a real bsdinstall run persists the
+  SunshineBSD payload onto the installed system, from the same
+  staging tree as the live environment.
+* System-account provisioning (messagebus, polkitd, sddm, and the
+  supser test login) at boot on read-only live media.
+
+0.2.0 (2026-07-15)
+------------------
+
+* flesk, the Lua system-info banner (SunshineBSD's neofetch).
+* SunshineBSD boot-loader branding: sunflower mascot logo and gold
+  wordmark in the loader menu.
+* uname identifies the system as SunshineBSD.
+
+0.1.x
+-----
+
+* Stage 0 foundation: repository scaffolding, the sunconfig Lua
+  configuration compiler, rc2runit (wrap FreeBSD rc.d scripts as
+  runit services), sunsnap (ZFS snapshot / boot-environment
+  lifecycle), zsh defaults, and the remastered-ISO build pipeline
+  on top of FreeBSD 14.3-RELEASE.
+
+Known limitations (beta)
+------------------------
+
+* The live ISO boots the stock FreeBSD 14.3 kernel; rc(8) still
+  bootstraps runit rather than runit replacing init outright
+  (Stage 4 is not built yet).
+* No GUI installer; installation goes through bsdinstall, with the
+  SunshineBSD payload applied from sunshine.txz.
+* No GPU acceleration in QEMU (scfb framebuffer; the desktop session
+  needs UEFI boot -- under legacy BIOS Xorg finds no screens).
+* Default live login: supser / password (documented test account).

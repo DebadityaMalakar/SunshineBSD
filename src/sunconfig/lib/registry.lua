@@ -41,16 +41,17 @@ local REGISTRY = {
     -- src/sysaccounts/provision-accounts, which fetch-pkg.sh's plain
     -- extract-only install bypasses.
     --
-    -- QT_QUICK_BACKEND=software: SDDM's greeter is a Qt Quick (QML) app
-    -- that wants a working OpenGL context by default. This project has no
-    -- GPU acceleration yet on purpose (xf86-video-scfb is a plain
-    -- unaccelerated framebuffer driver; drm-kmod is still deferred, see
-    -- PLAN-03.MD Open Questions). Live-tested 2026-07-18: without this,
-    -- the greeter stayed alive holding the VT/keyboard but painted
-    -- nothing -- a black screen indistinguishable from a hang. Matches
-    -- the same fix in src/flash/lib/start.lua's unsupervised launch path.
+    -- sunshine-sddm (src/sysaccounts/sddm-launch) picks the greeter's
+    -- Qt Quick backend at launch time: hardware GL when a KMS GPU is
+    -- attached (/dev/dri/card* -- i915kms via sunshine-provision-gpu,
+    -- 2026-07-21), QT_QUICK_BACKEND=software otherwise. The software
+    -- fallback is load-bearing: live-tested 2026-07-18 that without GL
+    -- and without it the greeter stays alive holding the VT/keyboard
+    -- but paints nothing -- a black screen indistinguishable from a
+    -- hang. The launcher execs sddm, so runit's foreground contract
+    -- holds. Matches src/flash/lib/start.lua's unsupervised launch path.
     sddm = {
-        command = "/usr/bin/env QT_QUICK_BACKEND=software /usr/local/bin/sddm",
+        command = "/usr/local/sbin/sunshine-sddm",
         description = "SDDM display/login manager (foreground, needs dbus+polkit+consolekit2+Xorg)",
     },
     bluetooth = {

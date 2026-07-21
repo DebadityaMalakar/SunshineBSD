@@ -85,7 +85,7 @@ LUA_SUITES = \
 	test-flash_start \
 	test-flash_enable
 
-SH_SUITES = test-rc2runit test-sunsnap test-zshrc test-provision_accounts test-provision_pkgfiles test-etc_overlay test-iso_parts
+SH_SUITES = test-rc2runit test-sunsnap test-zshrc test-provision_accounts test-provision_pkgfiles test-provision_gpu test-provision_procfs test-sddm_launch test-etc_overlay test-iso_parts
 
 .PHONY: all test check example clean $(LUA_SUITES) $(SH_SUITES) \
 	fetch brand world kernel image iso iso-dev qemu qemu-iso \

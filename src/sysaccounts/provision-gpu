@@ -1,0 +1,198 @@
+#!/bin/sh
+# provision-gpu -- boot-time GPU provisioning: hardware rendering when a
+# supported GPU is actually attached, the software path everywhere else.
+#
+# One job: reconcile the Xorg video driver state with the hardware found
+# at this boot. Concretely:
+#   1. detect an Intel display controller via pciconf(8) -- Intel only
+#      for now, the one vendor whose DRM kmod + firmware the ISO ships
+#      (see tools/iso/stage-packages.sh);
+#   2. if found, kldload i915kms and wait (bounded) for the DRM device
+#      node to appear;
+#   3. write the Xorg driver snippet to match what actually attached:
+#      Driver "modesetting" when /dev/dri/card* exists (xorg-server's
+#      built-in KMS DDX, glamor-accelerated, no extra package), or
+#      Driver "scfb" (the unaccelerated fallback the build bakes as the
+#      default) when it does not.
+#
+# Deliberately never fails the boot over a GPU problem: every hardware
+# step degrades to the scfb + software-rendering default that is already
+# known to work -- graceful fallback is this script's entire reason to
+# exist. The only hard error is being unable to write the Xorg snippet,
+# and even then the baked-in scfb default is still in place.
+#
+# The kernel/kmod version pairing matters: the FreeBSD:14 pkg repo
+# builds drm-61-kmod against __FreeBSD_version 1404000 (14.4), which is
+# why the ISO remasters 14.4-RELEASE (tools/make-iso.sh, bumped
+# 2026-07-21 for exactly this). If the pairing ever skews again and the
+# running kernel refuses the module, kldload fails here and the boot
+# continues on scfb + software rendering instead of breaking.
+#
+# The decision is re-evaluated (and the snippet rewritten if needed) on
+# every boot, so moving an installed disk between machines self-heals in
+# both directions.
+#
+# On the live/install ISO /usr/local sits on read-only cd9660 media, so
+# this first ensures it is writable via the same etc-overlay union-mount
+# mechanism provision-pkgfiles uses (a no-op on a real install's
+# writable ZFS root, and on an already-mounted overlay -- both scripts
+# share the same UPPER default, whichever runs first mounts it).
+#
+# usage: provision-gpu
+#
+# Environment (overridable for tests):
+#   LOCALBASE     package prefix (default: /usr/local)
+#   OVERLAY       writability helper (default: /usr/local/sbin/sunshine-etc-overlay)
+#   UPPER         overlay upper-layer mountpoint
+#                 (default: /var/run/sunshine_usrlocal_upper)
+#   MFSSIZE       overlay size (default: 256m, matching provision-pkgfiles
+#                 since they share the mount)
+#   PCICONF       pciconf(8) binary (default: /usr/sbin/pciconf)
+#   KLDLOAD       kldload(8) binary (default: /sbin/kldload)
+#   MODULESDIR    where DRM kmods live (default: /boot/modules)
+#   DRIDIR        DRM device directory (default: /dev/dri)
+#   ATTACH_TRIES  bounded wait for the device node, in tries (default: 5)
+#   ATTACH_SLEEP  seconds between tries (default: 1; set 0 in tests)
+
+set -eu
+
+if [ "$#" -ne 0 ]; then
+    echo "usage: provision-gpu" >&2
+    exit 2
+fi
+
+LOCALBASE="${LOCALBASE:-/usr/local}"
+OVERLAY="${OVERLAY:-/usr/local/sbin/sunshine-etc-overlay}"
+UPPER="${UPPER:-/var/run/sunshine_usrlocal_upper}"
+MFSSIZE="${MFSSIZE:-256m}"
+PCICONF="${PCICONF:-/usr/sbin/pciconf}"
+KLDLOAD="${KLDLOAD:-/sbin/kldload}"
+MODULESDIR="${MODULESDIR:-/boot/modules}"
+DRIDIR="${DRIDIR:-/dev/dri}"
+ATTACH_TRIES="${ATTACH_TRIES:-5}"
+ATTACH_SLEEP="${ATTACH_SLEEP:-1}"
+
+case "$ATTACH_TRIES$ATTACH_SLEEP" in
+    *[!0-9]*)
+        echo "provision-gpu: ATTACH_TRIES/ATTACH_SLEEP must be non-negative integers" >&2
+        exit 2
+        ;;
+esac
+
+log() {
+    echo "provision-gpu: $1"
+}
+
+# True when at least one DRM render device node exists -- the one signal
+# that a KMS driver is genuinely attached (module merely loaded but not
+# attached, e.g. no matching hardware, creates no node).
+dri_present() {
+    for node in "$DRIDIR"/card*; do
+        [ -e "$node" ] && return 0
+    done
+    return 1
+}
+
+# Detect an Intel display controller. pciconf -l prints one line per
+# device; PCI class 0x03 is "display". The vendor appears as
+# "vendor=0x8086" on FreeBSD 12+ and as the low word of "chip=0x...8086"
+# in the older format -- match both rather than assuming one.
+have_intel_gpu() {
+    "$PCICONF" -l 2>/dev/null | while read -r line; do
+        case "$line" in
+            *class=0x03*) ;;
+            *) continue ;;
+        esac
+        case "$line" in
+            *vendor=0x8086*|*chip=0x????8086*)
+                echo yes
+                break
+                ;;
+        esac
+    done
+}
+
+# --- 1. Intel: load the DRM kmod ------------------------------------------
+# Every failure on this path is logged and degrades to scfb; none aborts.
+
+if [ "$(have_intel_gpu)" = "yes" ]; then
+    if [ ! -f "$MODULESDIR/i915kms.ko" ]; then
+        log "Intel display device found but $MODULESDIR/i915kms.ko is not installed; staying on scfb"
+    elif ! "$KLDLOAD" -n i915kms; then
+        log "kldload i915kms failed (kernel/kmod version mismatch?); staying on scfb"
+    else
+        tries=0
+        while ! dri_present && [ "$tries" -lt "$ATTACH_TRIES" ]; do
+            tries=$((tries + 1))
+            [ "$ATTACH_SLEEP" -gt 0 ] && sleep "$ATTACH_SLEEP"
+        done
+        if ! dri_present; then
+            log "i915kms loaded but no $DRIDIR/card* appeared after $ATTACH_TRIES tries; staying on scfb"
+        fi
+    fi
+else
+    log "no Intel display device detected"
+fi
+
+# --- 2. pick the driver from what actually attached ------------------------
+# Purely on the device node, not on what step 1 did: if some other path
+# already produced a KMS device (kld_list, a future amdgpu step), the
+# accelerated driver is equally correct.
+
+if dri_present; then
+    driver="modesetting"
+else
+    driver="scfb"
+fi
+log "KMS device check ($DRIDIR/card*): using Xorg driver \"$driver\""
+
+# --- 3. write the Xorg snippet, only when it differs -----------------------
+
+if [ -x "$OVERLAY" ]; then
+    TARGET="$LOCALBASE" UPPER="$UPPER" MFSSIZE="$MFSSIZE" "$OVERLAY" || {
+        echo "provision-gpu: failed to make $LOCALBASE writable" >&2
+        exit 1
+    }
+else
+    log "overlay helper not found ($OVERLAY), assuming $LOCALBASE is writable"
+fi
+
+confdir="$LOCALBASE/etc/X11/xorg.conf.d"
+conf="$confdir/10-video.conf"
+
+mkdir -p "$confdir" || {
+    echo "provision-gpu: cannot create $confdir" >&2
+    exit 1
+}
+
+tmp="$conf.new.$$"
+cat > "$tmp" <<EOF
+# Written at boot by sunshine-provision-gpu -- do not edit, any change
+# is rewritten on the next boot. Driver "modesetting" when a KMS GPU is
+# attached (/dev/dri present), Driver "scfb" (unaccelerated fallback)
+# otherwise. The ISO build bakes the scfb variant as the default; see
+# tools/iso/stage-packages.sh.
+Section "Device"
+    Identifier "Card0"
+    Driver "$driver"
+EndSection
+EOF
+
+if [ -f "$conf" ] && cmp -s "$conf" "$tmp"; then
+    rm -f "$tmp"
+    log "$conf already selects $driver"
+else
+    mv "$tmp" "$conf" || {
+        echo "provision-gpu: cannot write $conf" >&2
+        rm -f "$tmp"
+        exit 1
+    }
+    # Verify the write landed (DOCS/ENGINEERING.MD rule 6).
+    grep -q "Driver \"$driver\"" "$conf" || {
+        echo "provision-gpu: $conf does not contain the driver just written" >&2
+        exit 1
+    }
+    log "wrote $conf (Driver \"$driver\")"
+fi
+
+log "done"
