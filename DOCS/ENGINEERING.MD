@@ -42,6 +42,17 @@ Adapted from the JPL "Power of Ten" rules to Lua:
    (roots, short paths) even when callers "know what they're doing".
 8. Untrusted input (user configuration) is evaluated only inside a
    sandbox with no `io`, no `os`, no `require`, and no bytecode loading.
+9. Existence/type checks (`fs.exists`, `fs.is_dir`, ...) must be pure
+   reads (`io.open`), never a write-like operation (`os.rename`,
+   `os.remove`). Confirmed the hard way, 2026-07-18: `fs.lua` checked
+   "does path X exist" via `os.rename(X, X)`, reasoning that a no-op
+   self-rename only succeeds if X exists. That is true, but it silently
+   also requires the filesystem to be writable — and SunshineBSD's own
+   live/install medium mounts its root **read-only**, so every such
+   check failed with EROFS regardless of whether the path existed,
+   breaking `sunconfig` against its own real `/etc/sunshine`. A target
+   this project ships to booting read-only is not an edge case to
+   special-case around; it is a normal, expected deployment mode.
 
 ## 4. Testing Standards
 

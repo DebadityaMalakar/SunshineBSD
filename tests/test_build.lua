@@ -53,14 +53,18 @@ T.case("build compiles the example into a staging tree", function()
     local meta = assert(fs.read_file(out .. "/etc/sunshine.conf"))
     T.match(meta, "desktop_environment=xfce\n")
 
-    -- services.lua: ntpd enabled, sshd disabled, desktop from desktop.lua
+    -- services.lua: ntpd enabled, sshd disabled. desktop.lua's
+    -- environment=xfce generates NO service of its own (the display
+    -- manager is sddm, a normal services.lua entry -- the old
+    -- /service/desktop lightdm mapping was removed 2026-07-19).
     T.eq(fs.exists(out .. "/service/ntpd/run"), true)
     T.eq(fs.exists(out .. "/service/ntpd/down"), false)
     T.eq(fs.exists(out .. "/service/sshd/run"), true)
     T.eq(fs.exists(out .. "/service/sshd/down"), true)
-    T.eq(fs.exists(out .. "/service/desktop/run"), true)
+    T.eq(fs.exists(out .. "/service/sddm/run"), true)
+    T.eq(fs.exists(out .. "/service/desktop/run"), false)
     T.eq(fs.is_dir(out .. "/var/log/sunshine/ntpd"), true)
-    T.eq(fs.is_dir(out .. "/var/log/sunshine/desktop"), true)
+    T.eq(fs.is_dir(out .. "/var/log/sunshine/sddm"), true)
 end)
 
 T.case("building twice into the same tree is idempotent", function()

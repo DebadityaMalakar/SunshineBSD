@@ -43,7 +43,8 @@ fetch_url() {
     name=$(basename "$dest")
     out="$cache/$name"
     if [ ! -f "$out" ]; then
-        curl -fL -o "$out.$$" "$url"
+        curl -fL --connect-timeout 15 --retry 2 --retry-delay 3 \
+            --retry-max-time 90 -o "$out.$$" "$url"
         [ -s "$out.$$" ] || {
             echo "fetch-fonts: empty download: $url" >&2
             rm -f "$out.$$"
@@ -67,15 +68,27 @@ echo "fetch-fonts: installed opensans (2 file(s))"
 
 emoji_dest="$tree/usr/local/share/fonts/noto-color-emoji"
 mkdir -p "$emoji_dest"
-# A real browser User-Agent is required: Google Fonts serves woff2 to
-# modern UAs and only serves plain TrueType to older/unrecognized ones;
-# TTF is what fontconfig on FreeBSD/Xfce wants.
-ua="Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/78.0"
-css=$(curl -fsL -A "$ua" "https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap")
-emoji_url=$(echo "$css" | grep -o 'https://fonts\.gstatic\.com/[^)]*' | head -n 1)
-[ -n "$emoji_url" ] || {
-    echo "fetch-fonts: could not resolve a Noto Color Emoji URL from the CSS2 API" >&2
-    exit 1
-}
-fetch_url "$emoji_url" "$emoji_dest/NotoColorEmoji.ttf"
+# Resolving the URL is itself a network call, so it only happens when the
+# font is not already cached -- otherwise a fully-cached build still died
+# here on a host that could not reach Google (confirmed 2026-07-21: every
+# other input was cached, and the build hung on this one lookup).
+if [ -f "$cache/NotoColorEmoji.ttf" ]; then
+    cp "$cache/NotoColorEmoji.ttf" "$emoji_dest/NotoColorEmoji.ttf"
+else
+    # A real browser User-Agent is required: Google Fonts serves woff2 to
+    # modern UAs and only serves plain TrueType to older/unrecognized
+    # ones; TTF is what fontconfig on FreeBSD/Xfce wants.
+    ua="Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/78.0"
+    css=$(curl -fsL --connect-timeout 15 --retry 2 --retry-max-time 90 \
+        -A "$ua" "https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap") || {
+        echo "fetch-fonts: could not reach the Google Fonts CSS2 API" >&2
+        exit 1
+    }
+    emoji_url=$(echo "$css" | grep -o 'https://fonts\.gstatic\.com/[^)]*' | head -n 1)
+    [ -n "$emoji_url" ] || {
+        echo "fetch-fonts: could not resolve a Noto Color Emoji URL from the CSS2 API" >&2
+        exit 1
+    }
+    fetch_url "$emoji_url" "$emoji_dest/NotoColorEmoji.ttf"
+fi
 echo "fetch-fonts: installed noto-color-emoji (1 file(s))"

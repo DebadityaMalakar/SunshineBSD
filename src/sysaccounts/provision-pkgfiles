@@ -1,0 +1,222 @@
+#!/bin/sh
+# provision-pkgfiles -- idempotently reconcile the on-disk file state that a
+# real `pkg install` would have produced but tools/fetch-pkg.sh's plain
+# archive extraction cannot: special file permissions recorded only in each
+# package's +MANIFEST, and the generated system caches that pkg's
+# post-install scripts normally build on the target machine.
+#
+# Root cause, confirmed live 2026-07-19 by driving a full SDDM login on the
+# booted ISO (see PLAN-03.MD's Decisions section): the Xfce session started
+# and then collapsed in under 30 seconds because
+#   - /usr/local/share/glib-2.0/schemas/gschemas.compiled did not exist:
+#     "GLib-GIO-ERROR: No GSettings schemas are installed on the system" is
+#     FATAL (SIGTRAP abort) for every GLib program that touches GSettings,
+#     including at-spi's bus launcher (the "org.a11y.Bus received signal 5"
+#     spam) and xfce4-panel plugin wrappers;
+#   - gdk-pixbuf's loaders.cache did not exist: "Could not load a pixbuf
+#     from icon theme", cascading into a fatal libwnck assertion;
+#   - the shared-mime-info database and per-theme icon caches were missing;
+#   - dbus-daemon-launch-helper had lost its 04750 root:messagebus mode
+#     (bsdtar extracting as an unprivileged build user cannot apply it), so
+#     every D-Bus system-bus activation failed with "Failed to execute
+#     program ...: Permission denied".
+# Regenerating the caches and restoring the modes on the live system, then
+# logging in again, produced a stable Xfce desktop -- these are the fixes,
+# verified, not guesses.
+#
+# Every mode entry below mirrors the real package's +MANIFEST byte for byte
+# (uname/gname/perm), read directly from the live FreeBSD:14:amd64 packages
+# on 2026-07-19. Every cache is built by the package's own tool already
+# present in the image, so the output is exactly what pkg would have made.
+#
+# On this project's live/install ISO /usr/local sits on read-only cd9660
+# media, so this script first ensures it is writable via the same
+# etc-overlay union-mount mechanism used for /etc (a no-op on a real
+# install's writable ZFS root, and on any already-mounted overlay).
+#
+# One job: reconcile package file state. Meant to run once per boot from
+# etc/rc.d/sunshine_provision (after provision-accounts, which creates the
+# messagebus group the helper's gname refers to), and safe to run
+# repeatedly -- every step checks before acting.
+#
+# usage: provision-pkgfiles
+#
+# Environment:
+#   LOCALBASE  package prefix to reconcile (default: /usr/local)
+#   OVERLAY    writability helper (default: /usr/local/sbin/sunshine-etc-overlay)
+#   UPPER      overlay upper-layer mountpoint
+#              (default: /var/run/sunshine_usrlocal_upper)
+#   MFSSIZE    overlay size (default: 256m -- icon caches alone can be tens
+#              of megabytes for a theme the size of elementary-xfce)
+#   CHOWN      chown(8) binary (default: /usr/sbin/chown; overridable for tests)
+#   CHMOD      chmod(1) binary (default: /bin/chmod; overridable for tests)
+
+set -eu
+
+if [ "$#" -ne 0 ]; then
+    echo "usage: provision-pkgfiles" >&2
+    exit 2
+fi
+
+LOCALBASE="${LOCALBASE:-/usr/local}"
+OVERLAY="${OVERLAY:-/usr/local/sbin/sunshine-etc-overlay}"
+UPPER="${UPPER:-/var/run/sunshine_usrlocal_upper}"
+MFSSIZE="${MFSSIZE:-256m}"
+CHOWN="${CHOWN:-/usr/sbin/chown}"
+CHMOD="${CHMOD:-/bin/chmod}"
+
+failures=0
+
+# --- 0. make $LOCALBASE writable (read-only live media only) -------------
+# etc-overlay probes writability itself and no-ops when the target is
+# already writable, so this is safe on a real install too.
+
+if [ -x "$OVERLAY" ]; then
+    TARGET="$LOCALBASE" UPPER="$UPPER" MFSSIZE="$MFSSIZE" "$OVERLAY" || {
+        echo "provision-pkgfiles: failed to make $LOCALBASE writable" >&2
+        exit 1
+    }
+else
+    echo "provision-pkgfiles: overlay helper not found ($OVERLAY), assuming $LOCALBASE is writable"
+fi
+
+# --- 1. +MANIFEST file modes ---------------------------------------------
+# path (relative to LOCALBASE):owner:group:mode -- each verified against
+# the real package manifest (see header). Files that are not installed
+# (package set changed) are skipped, not errors.
+
+pkg_modes="libexec/dbus-daemon-launch-helper:root:messagebus:4750
+bin/pkexec:root:wheel:4755
+lib/polkit-1/polkit-agent-helper-1:root:wheel:4755"
+
+# Directory modes, same story as the files above: read from polkit's real
+# +MANIFEST on 2026-07-21. polkit refuses to load rules from a rules.d it
+# does not consider trustworthy, and extraction leaves these world-
+# readable and root-owned instead of polkitd:wheel 0700 -- which matters
+# now that the build ships a rules file in there (the shutdown/restart
+# rules x11-wm/xfce4-session's own pkg-message asks for; see
+# tools/iso/stage-packages.sh).
+pkg_dir_modes="etc/polkit-1/rules.d:polkitd:wheel:0700
+share/polkit-1/rules.d:polkitd:wheel:0700"
+
+echo "$pkg_dir_modes" | while IFS=: read -r rel owner group mode; do
+    [ -n "$rel" ] || continue
+    path="$LOCALBASE/$rel"
+    if [ ! -d "$path" ]; then
+        echo "provision-pkgfiles: $path not installed, skipping"
+        continue
+    fi
+    echo "provision-pkgfiles: setting $owner:$group mode $mode on $path"
+    "$CHOWN" "$owner:$group" "$path" || {
+        echo "provision-pkgfiles: chown failed for $path" >&2
+        exit 1
+    }
+    "$CHMOD" "$mode" "$path" || {
+        echo "provision-pkgfiles: chmod failed for $path" >&2
+        exit 1
+    }
+done || failures=$((failures + 1))
+
+echo "$pkg_modes" | while IFS=: read -r rel owner group mode; do
+    [ -n "$rel" ] || continue
+    path="$LOCALBASE/$rel"
+    if [ ! -f "$path" ]; then
+        echo "provision-pkgfiles: $path not installed, skipping"
+        continue
+    fi
+    echo "provision-pkgfiles: setting $owner:$group mode $mode on $path"
+    "$CHOWN" "$owner:$group" "$path" || {
+        echo "provision-pkgfiles: chown failed for $path" >&2
+        exit 1
+    }
+    "$CHMOD" "$mode" "$path" || {
+        echo "provision-pkgfiles: chmod failed for $path" >&2
+        exit 1
+    }
+done || failures=$((failures + 1))
+
+# --- 2. generated caches --------------------------------------------------
+# Each entry: skip when the tool is absent (that package simply is not in
+# the image) or the cache is already present; rebuild otherwise, with the
+# package's own tool. A tool failing when it should work is a hard error.
+
+build_cache() { # cache-file description command...
+    cache="$1"; desc="$2"; shift 2
+    tool="$1"
+    if [ ! -x "$tool" ]; then
+        echo "provision-pkgfiles: $desc: tool not installed ($tool), skipping"
+        return 0
+    fi
+    if [ -e "$cache" ]; then
+        echo "provision-pkgfiles: $desc: already present"
+        return 0
+    fi
+    echo "provision-pkgfiles: $desc: generating"
+    "$@" || {
+        echo "provision-pkgfiles: $desc: FAILED" >&2
+        return 1
+    }
+}
+
+# GSettings schemas: missing gschemas.compiled is FATAL for GLib programs.
+if [ -d "$LOCALBASE/share/glib-2.0/schemas" ]; then
+    build_cache "$LOCALBASE/share/glib-2.0/schemas/gschemas.compiled" \
+        "GSettings schemas" \
+        "$LOCALBASE/bin/glib-compile-schemas" "$LOCALBASE/share/glib-2.0/schemas" \
+        || failures=$((failures + 1))
+fi
+
+# gdk-pixbuf loader cache: the tool writes loaders.cache next to the
+# loaders it finds; the versioned directory name is the tool's business,
+# so probe for any existing cache rather than hardcoding 2.10.0.
+pixbuf_cache=""
+for d in "$LOCALBASE"/lib/gdk-pixbuf-2.0/*/; do
+    [ -d "$d" ] && [ -e "$d/loaders.cache" ] && pixbuf_cache="$d/loaders.cache"
+done
+if [ -n "$pixbuf_cache" ]; then
+    echo "provision-pkgfiles: gdk-pixbuf loader cache: already present"
+elif [ ! -x "$LOCALBASE/bin/gdk-pixbuf-query-loaders" ]; then
+    echo "provision-pkgfiles: gdk-pixbuf loader cache: tool not installed, skipping"
+else
+    echo "provision-pkgfiles: gdk-pixbuf loader cache: generating"
+    "$LOCALBASE/bin/gdk-pixbuf-query-loaders" --update-cache || {
+        echo "provision-pkgfiles: gdk-pixbuf loader cache: FAILED" >&2
+        failures=$((failures + 1))
+    }
+fi
+
+# shared-mime-info database (Thunar/xfdesktop file-type resolution).
+if [ -d "$LOCALBASE/share/mime/packages" ]; then
+    build_cache "$LOCALBASE/share/mime/mime.cache" \
+        "shared-mime-info database" \
+        "$LOCALBASE/bin/update-mime-database" "$LOCALBASE/share/mime" \
+        || failures=$((failures + 1))
+fi
+
+# Per-theme icon caches (GTK icon lookups without one are slow at best,
+# and the missing-pixbuf cascade was fatal at worst).
+for theme_index in "$LOCALBASE"/share/icons/*/index.theme; do
+    [ -f "$theme_index" ] || continue
+    theme_dir="${theme_index%/index.theme}"
+    build_cache "$theme_dir/icon-theme.cache" \
+        "icon cache for ${theme_dir##*/}" \
+        "$LOCALBASE/bin/gtk-update-icon-cache" -f -q "$theme_dir" \
+        || failures=$((failures + 1))
+done
+
+# Fontconfig system cache (writes under /var/db/fontconfig, already
+# writable everywhere; fc-cache is cheap when up to date and this spares
+# the first interactive login the full scan).
+if [ -x "$LOCALBASE/bin/fc-cache" ]; then
+    echo "provision-pkgfiles: fontconfig cache: refreshing"
+    "$LOCALBASE/bin/fc-cache" -s || {
+        echo "provision-pkgfiles: fontconfig cache: FAILED" >&2
+        failures=$((failures + 1))
+    }
+fi
+
+if [ "$failures" -ne 0 ]; then
+    echo "provision-pkgfiles: done with $failures failure(s)" >&2
+    exit 1
+fi
+echo "provision-pkgfiles: done"

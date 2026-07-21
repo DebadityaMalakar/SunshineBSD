@@ -17,6 +17,10 @@
 #   make kernel            buildkernel KERNCONF=SUNSHINE
 #   make image             build dist/sunshinebsd.qcow2 (needs root)
 #   make qemu              boot the image (any host with qemu installed)
+#   make iso               remaster a bootable ISO (release: sunshine.txz
+#                          compressed with xz, smallest download)
+#   make iso-dev           same, but sunshine.txz uses zstd -- much faster
+#                          to pack, for boot-test iteration (not for release)
 
 LUA ?= lua
 SH  ?= sh
@@ -27,7 +31,30 @@ QEMU     ?= qemu-system-x86_64
 QEMU_MEM ?= 4G
 QEMU_CPUS ?= 4
 IMAGE    ?= dist/sunshinebsd.qcow2
-ISO      ?= dist/sunshinebsd-0.3-CURRENT-amd64.iso
+ISO      ?= dist/sunshinebsd-0.3.1-BETA-amd64.iso
+# OVMF UEFI firmware for qemu-iso -- confirmed live 2026-07-18: the
+# desktop session (xf86-video-scfb) only gets a usable framebuffer under
+# UEFI boot (vt(4)'s GOP path); legacy BIOS boot reproduces "no screens
+# found" every time regardless of any Xorg/driver config. Point these at
+# a real OVMF build (e.g. QEMU-for-Windows ships one under
+# <qemu-install>/share/edk2-x86_64-code.fd; OVMF_VARS must be a writable
+# copy, not the read-only template) -- left blank by default since the
+# path isn't portable across hosts, so qemu-iso silently falls back to
+# legacy BIOS (broken for the desktop session) until both are set.
+OVMF_CODE ?=
+OVMF_VARS ?=
+
+# Built via ifneq, not $(if ...): GNU Make's $(if cond,then,else) splits on
+# every comma, and -drive's own value is comma-separated -- $(if ...) here
+# silently mangled the argument (confirmed via `make -n qemu-iso`: it
+# dropped "-drive if=pflash," entirely, leaving a bare "format=raw,...").
+OVMF_ARGS :=
+ifneq ($(OVMF_CODE),)
+OVMF_ARGS += -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE)
+endif
+ifneq ($(OVMF_VARS),)
+OVMF_ARGS += -drive if=pflash,format=raw,file=$(OVMF_VARS)
+endif
 
 LUA_SUITES = \
 	test-util \
@@ -54,13 +81,15 @@ LUA_SUITES = \
 	test-flash_components \
 	test-flash_render \
 	test-flash_cli \
-	test-flash_deps
+	test-flash_deps \
+	test-flash_start \
+	test-flash_enable
 
-SH_SUITES = test-rc2runit test-sunsnap test-zshrc
+SH_SUITES = test-rc2runit test-sunsnap test-zshrc test-provision_accounts test-provision_pkgfiles test-provision_gpu test-provision_procfs test-sddm_launch test-etc_overlay test-iso_parts
 
 .PHONY: all test check example clean $(LUA_SUITES) $(SH_SUITES) \
-	fetch brand world kernel image iso qemu qemu-iso \
-	wsl-check wsl-world wsl-kernel wsl-iso
+	fetch brand world kernel image iso iso-dev qemu qemu-iso \
+	wsl-check wsl-world wsl-kernel wsl-iso wsl-iso-dev
 
 all: test
 
@@ -108,10 +137,15 @@ image:
 iso:
 	$(SH) tools/make-iso.sh
 
+iso-dev:
+	SUNSHINE_TXZ_COMPRESSION=zstd $(SH) tools/make-iso.sh
+
 qemu-iso:
-	$(QEMU) -m $(QEMU_MEM) -smp $(QEMU_CPUS) \
+	$(QEMU) -m $(QEMU_MEM) -smp $(QEMU_CPUS) -cpu qemu64 -vga std \
 		-cdrom $(ISO) -boot d \
-		-nic user,model=virtio-net-pci
+		-nic user,model=virtio-net-pci \
+		-serial stdio \
+		$(OVMF_ARGS)
 
 qemu:
 	$(QEMU) -m $(QEMU_MEM) -smp $(QEMU_CPUS) \
@@ -132,3 +166,6 @@ wsl-kernel:
 
 wsl-iso:
 	wsl -d $(WSL_DISTRO) -- sh tools/make-iso.sh
+
+wsl-iso-dev:
+	wsl -d $(WSL_DISTRO) -- env SUNSHINE_TXZ_COMPRESSION=zstd sh tools/make-iso.sh

@@ -1,0 +1,46 @@
+#!/bin/sh
+# sddm-launch -- start SDDM with the Qt Quick backend the GPU can support.
+#
+# One job: pick the greeter's rendering backend at launch time, then exec
+# sddm in the foreground (runit's run-script contract -- this must stay
+# exec, never fork).
+#
+# SDDM's greeter is a Qt Quick (QML) app whose default scene graph needs
+# a working OpenGL context. Live-tested 2026-07-18: with only the
+# unaccelerated scfb framebuffer, the greeter stays alive holding the
+# VT/keyboard but paints nothing -- a black screen indistinguishable
+# from a hang. QT_QUICK_BACKEND=software forces Qt Quick's software
+# rasterizer, which fixed it. That used to be forced unconditionally;
+# now that sunshine-provision-gpu can attach a real KMS driver (Intel
+# i915kms, 2026-07-21), the software rasterizer is only the fallback:
+# when /dev/dri/card* exists, mesa's hardware GL path works and Qt
+# Quick's default OpenGL scene graph is the right choice.
+#
+# The same /dev/dri/card* check sunshine-provision-gpu uses to pick the
+# Xorg driver, deliberately re-evaluated here at launch time rather than
+# read from provision output -- the two decisions stay independent and
+# each matches the hardware state at the moment it matters.
+#
+# usage: sddm-launch [sddm args...]   (args pass through to sddm)
+#
+# Environment (overridable for tests):
+#   DRIDIR  DRM device directory (default: /dev/dri)
+#   SDDM    sddm binary (default: /usr/local/bin/sddm)
+
+set -eu
+
+DRIDIR="${DRIDIR:-/dev/dri}"
+SDDM="${SDDM:-/usr/local/bin/sddm}"
+
+for node in "$DRIDIR"/card*; do
+    if [ -e "$node" ]; then
+        # KMS GPU attached: hardware GL, Qt Quick's default backend.
+        exec "$SDDM" "$@"
+    fi
+done
+
+# No KMS device: force the software rasterizer or the greeter renders
+# nothing at all (see header).
+QT_QUICK_BACKEND=software
+export QT_QUICK_BACKEND
+exec "$SDDM" "$@"

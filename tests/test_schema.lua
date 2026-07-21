@@ -27,7 +27,7 @@ T.case("a full valid config normalizes every service form", function()
         services = {
             sshd = true,
             ntpd = false,
-            dbus = { enabled = true, restart = false },
+            bluetooth = { enabled = true, restart = false },
             myapp = { command = "/usr/local/bin/myapp --fg" },
         },
         desktop = { environment = "xfce" },
@@ -35,7 +35,7 @@ T.case("a full valid config normalizes every service form", function()
     }))
     T.deep(cfg.services.sshd, { enabled = true, restart = true })
     T.deep(cfg.services.ntpd, { enabled = false, restart = true })
-    T.deep(cfg.services.dbus, { enabled = true, restart = false })
+    T.deep(cfg.services.bluetooth, { enabled = true, restart = false })
     T.eq(cfg.services.myapp.command, "/usr/local/bin/myapp --fg")
     T.eq(cfg.services.myapp.enabled, true)
     T.eq(cfg.security.kerrnil, true)

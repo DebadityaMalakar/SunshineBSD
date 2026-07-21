@@ -22,9 +22,20 @@ T.case("the core services from the plan are present", function()
 end)
 
 T.case("the PLAN-03.MD desktop-session services are present", function()
-    T.ok(registry.get("dbus"), "dbus")
-    T.ok(registry.get("polkit"), "polkit")
-    T.ok(registry.get("consolekit2"), "consolekit2")
+    T.ok(registry.get("sddm"), "sddm")
+end)
+
+T.case("dbus/polkit/consolekit2 are rc(8)-managed, not in this catalog", function()
+    -- Moved off runit entirely 2026-07-19 -- see PLAN-03.MD's Decisions
+    -- section. They're foundational, always-on prerequisites that don't
+    -- need runit's per-session flexibility, and bootstrapping them
+    -- through runit meant also bootstrapping runsvdir itself from
+    -- flash, extra fragility for no real benefit. dbus runs under its
+    -- own real upstream rc.d script; polkit/consolekit2 under
+    -- tools/make-iso.sh-written ones.
+    T.eq(registry.get("dbus"), nil)
+    T.eq(registry.get("polkit"), nil)
+    T.eq(registry.get("consolekit2"), nil)
 end)
 
 T.case("every entry has a valid absolute foreground command", function()

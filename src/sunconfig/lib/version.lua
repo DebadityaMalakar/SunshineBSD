@@ -2,7 +2,7 @@
 
 local M = {}
 
-M.VERSION = "0.3.0"
+M.VERSION = "0.3.1"
 M.NAME = "SunshineBSD sunconfig"
 
 function M.line()
